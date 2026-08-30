@@ -9,7 +9,7 @@
 
 services:
   rtm-task-ui:
-    image: ghcr.io/realtimemap/rtm-task-ui:${TAG:-latest}
+    image: ghcr.io/realtimemap/rtm-task:${TAG:-latest}
     build:
       context: .
       dockerfile: Dockerfile
