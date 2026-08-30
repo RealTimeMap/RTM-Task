@@ -1,0 +1,21 @@
+# Ставится заново внутри образа через npm ci
+node_modules
+
+# Собирается внутри образа
+dist
+
+# Локальные настройки: адреса стендов и подмена личности для разработки
+.env
+.env.*
+!.env.example
+
+.git
+.gitignore
+.idea
+.vscode
+*.md
+docker-compose.yml
+Dockerfile
+.dockerignore
+
+tests/

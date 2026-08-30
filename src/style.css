@@ -1,0 +1,225 @@
+/**
+ * Дизайн-токены RealTimeMap Tasks.
+ * Значения взяты из макета «RealTimeMap Tasks» (Claude Design).
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+:root {
+  /* Поверхности */
+  --bg-app: #07080c;
+  --bg-shell: #0b0d13;
+  --bg-panel: #090b10;
+  --bg-modal: #0d0f15;
+
+  /* Текст */
+  --ink: #e9e9ed;
+  --ink-70: rgba(233, 233, 237, 0.7);
+  --ink-60: rgba(233, 233, 237, 0.6);
+  --ink-45: rgba(233, 233, 237, 0.45);
+  --ink-40: rgba(233, 233, 237, 0.4);
+  --ink-30: rgba(233, 233, 237, 0.3);
+
+  /* Границы и заливки */
+  --line: rgba(255, 255, 255, 0.06);
+  --line-strong: rgba(255, 255, 255, 0.08);
+  --line-hover: rgba(255, 255, 255, 0.16);
+  --fill-soft: rgba(255, 255, 255, 0.04);
+  --fill-softer: rgba(255, 255, 255, 0.028);
+  --fill-hover: rgba(255, 255, 255, 0.06);
+
+  /* Акцент */
+  --accent: #4d8dfa;
+  --accent-ink: #bcd5ff;
+  --accent-bg: rgba(77, 141, 250, 0.13);
+  --accent-bg-strong: rgba(77, 141, 250, 0.16);
+  --accent-border: rgba(77, 141, 250, 0.4);
+  --accent-gradient: linear-gradient(150deg, #4d8dfa, #2a4bd8);
+  --accent-shadow: 0 10px 24px rgba(42, 75, 216, 0.35);
+
+  /* Семантика */
+  --danger: #e5484d;
+  --danger-ink: #ff9a9d;
+  --danger-bg: rgba(229, 72, 77, 0.13);
+  --warning: #f5c451;
+  --warning-ink: #ffd08a;
+  --warning-bg: rgba(245, 196, 81, 0.13);
+  --success: #3ddc97;
+  --success-ink: #8df0c4;
+  --success-bg: rgba(61, 220, 151, 0.13);
+  --violet: #6b4df5;
+  --violet-ink: #cbd7ff;
+  --violet-bg: rgba(107, 77, 245, 0.15);
+
+  /* Скругления */
+  --r-sm: 7px;
+  --r-md: 10px;
+  --r-lg: 12px;
+  --r-xl: 14px;
+  --r-2xl: 18px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  /* Фон совпадает с приложением: иначе при overscroll видна чужая
+     полоса по краю. */
+  background: var(--bg-shell);
+  color: var(--ink);
+  font-family: Inter, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  /* Страница не скроллится целиком — прокручиваются области внутри. */
+  overflow: hidden;
+}
+
+#app {
+  height: 100dvh;
+}
+
+input,
+button,
+textarea {
+  font-family: inherit;
+}
+
+/*
+  Safari на iOS увеличивает страницу при фокусе на поле, если его шрифт
+  меньше 16px, и обратно уже не возвращает. Поднимаем размер на всех
+  тач-устройствах — это дешевле, чем запрещать масштабирование целиком.
+*/
+@media (pointer: coarse) {
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
+
+button {
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  color: #7cadfd;
+}
+
+/* Скроллбар в тон интерфейсу */
+.tk-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.tk-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.09);
+  border-radius: 4px;
+}
+
+/* Инерционная прокрутка на iOS и никакой цепной прокрутки страницы
+   за пределами области. */
+.tk-scroll {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+/* Интерактивные поверхности */
+.tk-tap {
+  cursor: pointer;
+  transition:
+    background 0.16s,
+    border-color 0.16s,
+    color 0.16s,
+    transform 0.1s;
+  /* Убирает серую вспышку по тапу в мобильных браузерах. */
+  -webkit-tap-highlight-color: transparent;
+}
+
+/*
+  Подсветку при наведении включаем только там, где есть настоящий
+  курсор: на тач-устройствах она залипает после тапа, и элемент
+  остаётся подсвеченным, пока не нажмёшь другой.
+*/
+@media (hover: hover) {
+  .tk-tap:hover {
+    background: var(--fill-hover);
+  }
+}
+
+.tk-tap:active {
+  transform: scale(0.99);
+}
+
+.tk-tap:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) {
+  /* Элементы, которым не нужна подсветка фона при наведении */
+  .tk-plain:hover {
+    background: transparent;
+  }
+
+  .tk-card:hover {
+    border-color: var(--line-hover);
+  }
+
+  .tk-row:hover {
+    background: rgba(255, 255, 255, 0.032);
+  }
+}
+
+@keyframes tkFade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes tkUp {
+  from {
+    transform: translateY(14px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.tk-fade {
+  animation: tkFade 0.2s ease both;
+}
+
+.tk-rise {
+  animation: tkUp 0.2s cubic-bezier(0.22, 0.9, 0.24, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tk-fade,
+  .tk-rise {
+    animation: none;
+  }
+
+  .tk-tap {
+    transition: none;
+  }
+
+  .tk-tap:active {
+    transform: none;
+  }
+}
