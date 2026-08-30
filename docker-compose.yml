@@ -15,6 +15,11 @@ services:
       dockerfile: Dockerfile
     container_name: rtm-task-ui
     restart: always
+    environment:
+      # Адрес auth-service для nginx: он проксирует туда /api/v2/auth,
+      # чтобы форма входа обращалась к своему origin и не упиралась в CORS.
+      # Резолвится во время запроса, поэтому порядок запуска не важен.
+      - AUTH_HOST=${AUTH_HOST:-realtime-map-backend:8001}
     logging:
       driver: loki
       options:
@@ -25,20 +30,16 @@ services:
 
       # Статика интерфейса. Приоритет ниже, чем у роутеров бэкенда:
       # /api/v1 и /socket.io должны уходить в него, а сюда — всё остальное.
-      - "traefik.http.routers.rtm-task-ui.rule=Host(`task.realtimemap.ru`)"
+      - "traefik.http.routers.rtm-task-ui.rule=Host(`${APP_DOMAIN:-task.realtimemap.ru}`)"
       - "traefik.http.routers.rtm-task-ui.entrypoints=websecure"
       - "traefik.http.routers.rtm-task-ui.priority=10"
       - "traefik.http.routers.rtm-task-ui.service=rtm-task-ui"
       - "traefik.http.routers.rtm-task-ui.tls=true"
 
-      # HTTP → HTTPS: интерфейс открывают из браузера руками,
-      # и адрес без схемы должен доводить до рабочей страницы.
-      - "traefik.http.routers.rtm-task-ui-http.rule=Host(`task.realtimemap.ru`)"
-      - "traefik.http.routers.rtm-task-ui-http.entrypoints=web"
-      - "traefik.http.routers.rtm-task-ui-http.priority=10"
-      - "traefik.http.routers.rtm-task-ui-http.middlewares=rtm-task-ui-https"
-      - "traefik.http.middlewares.rtm-task-ui-https.redirectscheme.scheme=https"
-      - "traefik.http.middlewares.rtm-task-ui-https.redirectscheme.permanent=true"
+      # Роутера на entrypoint web здесь нет намеренно: он слушает :82
+      # внутри контейнера traefik, а наружу проброшен :80 — то есть на
+      # обычный http-порт никто не отвечает, и редирект был бы мёртвым.
+      # Остальные сервисы платформы живут так же, только на websecure.
 
       - "traefik.http.services.rtm-task-ui.loadbalancer.server.port=80"
     networks:
