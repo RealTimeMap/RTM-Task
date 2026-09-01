@@ -171,8 +171,12 @@ const assignableMembers = computed(() => {
 function onKeydown(event: KeyboardEvent): void {
   if (event.key !== 'Escape' || !selected.value) return
 
-  // Из режима правки описания выходим в просмотр, а не закрываем всё:
-  // иначе один Escape терял бы черновик.
+  // Escape снимает верхний открытый слой, а не закрывает всё сразу:
+  // иначе один случайный нажим терял бы черновик описания.
+  if (assigneePickerOpen.value) {
+    assigneePickerOpen.value = false
+    return
+  }
   if (editingDescription.value) {
     cancelDescription()
     return
@@ -294,37 +298,56 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
         <section>
           <h3 class="dialog__label">ИСПОЛНИТЕЛЬ</h3>
 
-          <button
-            class="tk-tap assignee"
-            :disabled="selected.status === 'complete'"
-            @click="assigneePickerOpen = !assigneePickerOpen"
-          >
-            <AvatarBadge :staff="assignee" :size="28" />
-            <span class="assignee__name">{{ assignee?.fullName ?? 'Не назначено' }}</span>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M6 9.5l6 6 6-6" />
-            </svg>
-          </button>
-
-          <div v-if="assigneePickerOpen" class="picker">
+          <!-- Обёртка задаёт систему координат для списка: он
+               раскрывается поверх содержимого, а не раздвигает его. -->
+          <div class="assignee-field">
             <button
-              v-for="member in assignableMembers"
-              :key="member.id"
-              class="tk-tap tk-plain picker__item"
-              :class="{ 'picker__item--active': member.id === selected.assigneeId }"
-              @click="pickAssignee(member.id)"
+              class="tk-tap assignee"
+              :disabled="selected.status === 'complete'"
+              @click="assigneePickerOpen = !assigneePickerOpen"
             >
-              <AvatarBadge :staff="member" :size="24" />
-              <span class="picker__name">{{ member.fullName }}</span>
+              <AvatarBadge :staff="assignee" :size="28" />
+              <span class="assignee__name">{{ assignee?.fullName ?? 'Не назначено' }}</span>
+              <svg
+                class="assignee__chevron"
+                :class="{ 'assignee__chevron--open': assigneePickerOpen }"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M6 9.5l6 6 6-6" />
+              </svg>
             </button>
 
-            <button
-              v-if="selected.assigneeId !== null"
-              class="tk-tap tk-plain picker__item picker__item--clear"
-              @click="pickAssignee(null)"
-            >
-              Снять исполнителя
-            </button>
+            <!-- Клик мимо списка закрывает его: раскрытый, он перекрывает
+                 то, что под ним, и должен убираться так же легко. -->
+            <div
+              v-if="assigneePickerOpen"
+              class="picker-scrim"
+              @click="assigneePickerOpen = false"
+            />
+
+            <div v-if="assigneePickerOpen" class="tk-scroll picker">
+              <button
+                v-for="member in assignableMembers"
+                :key="member.id"
+                class="tk-tap tk-plain picker__item"
+                :class="{ 'picker__item--active': member.id === selected.assigneeId }"
+                @click="pickAssignee(member.id)"
+              >
+                <AvatarBadge :staff="member" :size="24" />
+                <span class="picker__name">{{ member.fullName }}</span>
+              </button>
+
+              <button
+                v-if="selected.assigneeId !== null"
+                class="tk-tap tk-plain picker__item picker__item--clear"
+                @click="pickAssignee(null)"
+              >
+                Снять исполнителя
+              </button>
+            </div>
           </div>
         </section>
 
@@ -695,15 +718,57 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
   color: var(--ink-45);
 }
 
+/* Стрелка разворачивается вверх, когда список открыт: без этого
+   непонятно, что кнопка сейчас в раскрытом состоянии. */
+.assignee__chevron {
+  transition: transform 0.16s;
+}
+
+.assignee__chevron--open {
+  transform: rotate(180deg);
+}
+
+.assignee-field {
+  position: relative;
+}
+
+/*
+  Список раскрывается поверх содержимого, а не в потоке: иначе он
+  раздвигал бы блоки под собой и окно подпрыгивало при каждом открытии.
+*/
+/*
+  Список раскрывается вверх, а не вниз: поле исполнителя стоит внизу
+  колонки, и вниз он упёрся бы в её край — колонка прокручиваемая
+  (overflow: auto) и обрезала бы содержимое. Вверх места достаточно.
+*/
 .picker {
-  margin-top: 7px;
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 5;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--line);
+  /* Непрозрачный фон обязателен: под списком лежит другое содержимое. */
+  background: var(--bg-modal);
+  border: 1px solid var(--line-strong);
   border-radius: var(--r-lg);
   padding: 6px;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.55);
+  /* Длинный список команды не должен уезжать за пределы окна. */
+  max-height: 240px;
+  overflow-y: auto;
+  animation: tkFade 0.14s ease both;
+}
+
+
+/* Ловит клик мимо списка. Прозрачная, но перекрывает всё окно —
+   поэтому лежит ниже самого списка по z-index. */
+.picker-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 4;
 }
 
 .picker__item {
