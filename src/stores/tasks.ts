@@ -193,6 +193,7 @@ export const useTasksStore = defineStore('tasks', () => {
       TaskEvents.Created,
       TaskEvents.Updated,
       TaskEvents.StatusChanged,
+      TaskEvents.Reworked,
       TaskEvents.Assigned,
       TaskEvents.Unassigned,
     ]) {
@@ -266,6 +267,17 @@ export const useTasksStore = defineStore('tasks', () => {
     }
 
     return changeStatus(id, status)
+  }
+
+  /**
+   * Возвращает завершённую задачу в работу с замечанием.
+   *
+   * Отдельное действие, а не changeStatus: сервер не пускает complete
+   * обратно по таблице переходов, потому что возврат требует описания
+   * того, что нужно доделать.
+   */
+  async function sendToRework(id: number, note: string): Promise<Task | null> {
+    return mutate(() => tasksApi.sendToRework(id, note))
   }
 
   async function setPriority(id: number, priority: TaskPriority): Promise<Task | null> {
@@ -352,6 +364,7 @@ export const useTasksStore = defineStore('tasks', () => {
     update,
     changeStatus,
     changeStatusAsOwner,
+    sendToRework,
     setPriority,
     assign,
     unassign,

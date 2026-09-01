@@ -17,7 +17,14 @@ import {
   shortDate,
   taskCode,
 } from '../lib/presentation'
-import { STATUS_ORDER, canTransition, type TaskPriority, type TaskStatus } from '../types/task'
+import {
+  STATUS_ORDER,
+  canSendToRework,
+  canTransition,
+  isInRework,
+  type TaskPriority,
+  type TaskStatus,
+} from '../types/task'
 
 const tasks = useTasksStore()
 const session = useSessionStore()
@@ -32,12 +39,17 @@ const editingDescription = ref(false)
 const descriptionDraft = ref('')
 const savingDescription = ref(false)
 
+const reworkOpen = ref(false)
+const reworkDraft = ref('')
+const sendingRework = ref(false)
+
 // Смена задачи закрывает вспомогательные панели: черновик описания
 // относится к конкретной задаче и на другую не переносится.
 watch(selected, () => {
   assigneePickerOpen.value = false
   editingDescription.value = false
   descriptionDraft.value = ''
+  closeRework()
 })
 
 function startEditDescription(): void {
@@ -66,6 +78,16 @@ async function saveDescription(): Promise<void> {
   }
 }
 
+function openRework(): void {
+  reworkDraft.value = ''
+  reworkOpen.value = true
+}
+
+function closeRework(): void {
+  reworkOpen.value = false
+  reworkDraft.value = ''
+}
+
 const assignee = computed(() => session.memberById(selected.value?.assigneeId ?? null))
 const creator = computed(() => session.memberById(selected.value?.creatorId ?? null))
 
@@ -80,6 +102,37 @@ const canEdit = computed(() => {
 
   return task.creatorId === me.id || task.assigneeId === me.id || permissions.value.canAssignAnyone
 })
+
+/** Замечание к последней доработке, если задачу вернули и ещё не приняли. */
+const rework = computed(() => {
+  const task = selected.value
+  if (!task || !isInRework(task)) return null
+
+  return {
+    note: task.reworkNote ?? '',
+    author: session.memberById(task.reworkById ?? null)?.fullName ?? 'Неизвестно',
+    at: task.reworkAt ? shortDate(task.reworkAt) : '',
+  }
+})
+
+/** Отправить в доработку можно завершённую задачу — и только тому, кто её ведёт. */
+const canRework = computed(() => canEdit.value && !!selected.value && canSendToRework(selected.value))
+
+async function submitRework(): Promise<void> {
+  const task = selected.value
+  if (!task) return
+
+  sendingRework.value = true
+  try {
+    const updated = await tasks.sendToRework(task.id, reworkDraft.value.trim())
+    if (updated) {
+      closeRework()
+      toast.show(`${taskCode(updated.id)} → ${STATUS_TITLES[updated.status]}: отправлена в доработку`)
+    }
+  } finally {
+    sendingRework.value = false
+  }
+}
 
 const meta = computed(() => {
   const task = selected.value
@@ -177,6 +230,10 @@ function onKeydown(event: KeyboardEvent): void {
     assigneePickerOpen.value = false
     return
   }
+  if (reworkOpen.value) {
+    closeRework()
+    return
+  }
   if (editingDescription.value) {
     cancelDescription()
     return
@@ -218,6 +275,16 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
       <div class="dialog__body">
         <div class="tk-scroll dialog__main">
           <h2 class="dialog__title">{{ selected.title }}</h2>
+
+          <!-- Замечание к доработке: показывается до тех пор, пока задачу
+               не приняли заново, потому что это и есть текущее задание. -->
+          <section v-if="rework" class="rework">
+            <div class="rework__head">
+              <span class="rework__badge">НА ДОРАБОТКЕ</span>
+              <span class="rework__meta">{{ rework.author }} · {{ rework.at }}</span>
+            </div>
+            <MarkdownText :source="rework.note" placeholder="" />
+          </section>
 
           <section class="description">
             <div class="description__head">
@@ -269,6 +336,39 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
               {{ button.label }}
             </button>
           </div>
+
+          <!-- Возврат в работу: единственный выход из «Завершена»,
+               поэтому кнопка живёт рядом со статусами, а не среди действий. -->
+          <template v-if="canRework">
+            <button
+              v-if="!reworkOpen"
+              class="tk-tap tk-plain rework-button"
+              @click="openRework"
+            >
+              Отправить в доработку
+            </button>
+
+            <div v-else class="rework-form">
+              <h4 class="rework-form__label">Что нужно доделать</h4>
+              <MarkdownEditor
+                v-model="reworkDraft"
+                :rows="4"
+                placeholder="Опишите, что исправить"
+              />
+              <div class="rework-form__actions">
+                <button
+                  class="tk-tap tk-plain rework-form__submit"
+                  :disabled="sendingRework || reworkDraft.trim().length < 5"
+                  @click="submitRework"
+                >
+                  {{ sendingRework ? 'Отправляем…' : 'Вернуть в работу' }}
+                </button>
+                <button class="tk-tap tk-plain rework-form__cancel" @click="closeRework">
+                  Отмена
+                </button>
+              </div>
+            </div>
+          </template>
         </section>
 
         <section class="meta">
@@ -814,5 +914,90 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
 
 .danger-button:hover {
   background: rgba(229, 72, 77, 0.2);
+}
+/* Замечание к доработке. Тон предупреждающий: это не оформление
+   задачи, а невыполненное требование к уже сданной работе. */
+.rework {
+  margin-bottom: 18px;
+  padding: 12px 14px;
+  background: var(--warning-bg);
+  border: 1px solid rgba(245, 196, 81, 0.28);
+  border-left: 3px solid var(--warning);
+  border-radius: var(--r-md);
+}
+
+.rework__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.rework__badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.11em;
+  color: var(--warning-ink);
+}
+
+.rework__meta {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ink-45);
+}
+
+.rework-button {
+  width: 100%;
+  margin-top: 8px;
+  height: 36px;
+  border: 1px solid rgba(245, 196, 81, 0.32);
+  border-radius: var(--r-md);
+  background: var(--warning-bg);
+  color: var(--warning-ink);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.rework-form {
+  margin-top: 10px;
+}
+
+.rework-form__label {
+  margin: 0 0 8px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.11em;
+  color: var(--ink-45);
+}
+
+.rework-form__actions {
+  display: flex;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.rework-form__submit {
+  flex: 1;
+  height: 36px;
+  border-radius: var(--r-md);
+  background: var(--accent-gradient);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.rework-form__submit:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.rework-form__cancel {
+  height: 36px;
+  padding: 0 12px;
+  border-radius: var(--r-md);
+  color: var(--ink-60);
+  font-size: 12.5px;
+  font-weight: 600;
 }
 </style>

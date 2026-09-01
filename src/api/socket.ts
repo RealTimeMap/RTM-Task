@@ -19,6 +19,7 @@ export const TaskEvents = {
   Created: 'taskCreated',
   Updated: 'taskUpdated',
   StatusChanged: 'taskStatusChanged',
+  Reworked: 'taskReworked',
   Assigned: 'taskAssigned',
   Unassigned: 'taskUnassigned',
   Deleted: 'taskDeleted',

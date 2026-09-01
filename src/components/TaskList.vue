@@ -88,34 +88,18 @@ const { visible } = storeToRefs(tasks)
    карточная раскладка ещё избыточна — таблица уезжает в горизонтальную
    прокрутку.
 
-   Верхняя граница 1200, а не 1000: при 1024px вместе с сайдбаром на
-   таблицу остаётся ~730px, и без прокрутки строки бы разъехались.
-   Нижняя нужна, чтобы min-width не протёк в мобильную раскладку
-   и не растянул карточки на 900px. */
-@media (min-width: 721px) and (max-width: 1200px) {
-  .table {
-    overflow-x: auto;
-  }
-
-  .table__head,
-  .table__row {
-    min-width: 900px;
-  }
-}
-
-/*
-  На телефоне горизонтальная прокрутка таблицы нечитаема, поэтому
-  строки превращаются в карточки: заголовок сверху, метки и
-  исполнитель — под ним.
-*/
-@media (max-width: 720px) {
+   Порог 1200: ниже него семи колонкам не хватает места даже с учётом
+   сайдбара (на 1024px таблице остаётся ~730px из нужных 900), и строки
+   разъезжались бы. Горизонтальная прокрутка вместо этого читается плохо,
+   поэтому строки становятся карточками — как на телефоне, но в две
+   колонки и со всеми полями: места здесь хватает. */
+@media (max-width: 1200px) {
   .table {
     background: transparent;
     border: 0;
     border-radius: 0;
-    overflow: visible;
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
     gap: 10px;
   }
 
@@ -125,14 +109,13 @@ const { visible } = storeToRefs(tasks)
 
   .table__row {
     display: grid;
-    grid-template-columns: auto 1fr;
+    grid-template-columns: auto 1fr auto;
     grid-template-areas:
-      'code    title'
-      'type    status'
-      'people  people';
+      'code   title   date'
+      'type   status  prio'
+      'people people  people';
     align-items: center;
     gap: 8px 10px;
-    min-width: 0;
     padding: 13px 14px;
     background: var(--fill-soft);
     border: 1px solid var(--line-strong);
@@ -166,8 +149,36 @@ const { visible } = storeToRefs(tasks)
     grid-area: people;
   }
 
+  .table__priority {
+    grid-area: prio;
+    justify-self: end;
+  }
+
+  .table__date {
+    grid-area: date;
+  }
+}
+
+/*
+  Телефон: та же карточная раскладка, но в один столбец и без
+  второстепенных полей — ширины на них уже не хватает.
+*/
+@media (max-width: 720px) {
+  /* Одна карточка в ряд: на телефоне на две не хватает ширины. */
+  .table {
+    grid-template-columns: 1fr;
+  }
+
+  .table__row {
+    grid-template-columns: auto 1fr;
+    grid-template-areas:
+      'code    title'
+      'type    status'
+      'people  people';
+  }
+
   /* Приоритет и дата в мобильной карточке избыточны — они видны
-     в панели деталей. */
+     в окне задачи, а место дороже. */
   .table__priority,
   .table__date {
     display: none;

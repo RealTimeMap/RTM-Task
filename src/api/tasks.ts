@@ -29,6 +29,14 @@ export const tasksApi = {
     return request<Task>(`/tasks/${id}/status`, { method: 'PATCH', body: { status } })
   },
 
+  /**
+   * Возврат завершённой задачи в работу. Отдельный маршрут, а не смена
+   * статуса: замечание обязательно, и это видно по контракту.
+   */
+  sendToRework(id: number, note: string): Promise<Task> {
+    return request<Task>(`/tasks/${id}/rework`, { method: 'POST', body: { note } })
+  },
+
   assign(id: number, assigneeId: number): Promise<Task> {
     return request<Task>(`/tasks/${id}/assignee`, { method: 'PUT', body: { assigneeId } })
   },

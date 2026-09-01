@@ -7,7 +7,14 @@ import MarkdownEditor from './ui/MarkdownEditor.vue'
 import { useSessionStore } from '../stores/session'
 import { useTasksStore } from '../stores/tasks'
 import { useToastStore } from '../stores/toast'
-import { PRIORITY_ORDER, TYPE_TITLES, TYPE_TONES, priorityTone, taskCode } from '../lib/presentation'
+import {
+  PRIORITY_ORDER,
+  TYPE_ORDER,
+  TYPE_TITLES,
+  TYPE_TONES,
+  priorityTone,
+  taskCode,
+} from '../lib/presentation'
 import { Priority, type TaskPriority, type TaskType } from '../types/task'
 
 const props = defineProps<{ open: boolean }>()
@@ -26,7 +33,7 @@ const priority = ref<TaskPriority>(Priority.Medium)
 const assigneeId = ref<number | null>(null)
 const submitting = ref(false)
 
-const typeOptions: TaskType[] = ['bug', 'feature', 'fix']
+const typeOptions: TaskType[] = TYPE_ORDER
 
 /** Разработчик может назначить задачу только на себя. */
 const assignableMembers = computed(() => {
@@ -361,13 +368,20 @@ async function submit(): Promise<void> {
   margin: 0 0 8px;
 }
 
+/* Перенос: типов пять, и «Рефакторинг» с «Обновлением» в одну строку
+   уже не помещаются — без wrap кнопки сжимались и текст вылезал. */
 .options {
   display: flex;
+  flex-wrap: wrap;
   gap: 7px;
 }
 
 .option {
-  flex: 1;
+  /* Растём от содержимого, а не делим строку поровну: иначе кнопка,
+     перенесённая на вторую строку, растянулась бы на всю ширину. */
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0 10px;
   height: 36px;
   border-radius: var(--r-md);
   display: flex;

@@ -50,6 +50,9 @@
   --violet: #6b4df5;
   --violet-ink: #cbd7ff;
   --violet-bg: rgba(107, 77, 245, 0.15);
+  --cyan: #1cb6c8;
+  --cyan-ink: #8ee6f0;
+  --cyan-bg: rgba(28, 182, 200, 0.14);
 
   /* Скругления */
   --r-sm: 7px;

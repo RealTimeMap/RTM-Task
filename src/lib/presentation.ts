@@ -31,6 +31,18 @@ export const TYPE_TONES: Record<TaskType, Tone> = {
     bg: 'var(--success-bg)',
     dot: 'var(--success)',
   },
+  refactor: {
+    label: 'РЕФАКТОРИНГ',
+    ink: 'var(--violet-ink)',
+    bg: 'var(--violet-bg)',
+    dot: 'var(--violet)',
+  },
+  update: {
+    label: 'ОБНОВЛЕНИЕ',
+    ink: 'var(--cyan-ink)',
+    bg: 'var(--cyan-bg)',
+    dot: 'var(--cyan)',
+  },
 }
 
 export const STATUS_TONES: Record<TaskStatus, Tone> = {
@@ -72,7 +84,15 @@ export const TYPE_TITLES: Record<TaskType, string> = {
   bug: 'Баг',
   feature: 'Фича',
   fix: 'Фикс',
+  refactor: 'Рефакторинг',
+  update: 'Обновление',
 }
+
+/**
+ * Порядок типов в списках и фильтрах. Держится рядом с подписями,
+ * чтобы новый тип добавлялся в одном месте, а не в каждом компоненте.
+ */
+export const TYPE_ORDER = Object.keys(TYPE_TITLES) as TaskType[]
 
 interface PriorityTone {
   label: string

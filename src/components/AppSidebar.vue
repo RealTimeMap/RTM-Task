@@ -5,7 +5,7 @@ import { storeToRefs } from 'pinia'
 import AvatarBadge from './ui/AvatarBadge.vue'
 import { useSessionStore } from '../stores/session'
 import { useTasksStore, type ScopeMode, type ViewMode } from '../stores/tasks'
-import { TYPE_TITLES, TYPE_TONES } from '../lib/presentation'
+import { TYPE_ORDER, TYPE_TITLES, TYPE_TONES } from '../lib/presentation'
 import { ROLE_LABELS } from '../types/staff'
 import type { TaskType } from '../types/task'
 
@@ -44,7 +44,7 @@ async function pickView(option: ViewOption): Promise<void> {
 }
 
 const typeOptions = computed(() => {
-  const types: (TaskType | 'all')[] = ['all', 'bug', 'feature', 'fix']
+  const types: (TaskType | 'all')[] = ['all', ...TYPE_ORDER]
 
   return types.map((key) => ({
     key,
