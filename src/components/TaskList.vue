@@ -12,22 +12,110 @@ import {
   shortDate,
   taskCode,
 } from '../lib/presentation'
+import type { SortField } from '../types/task'
 
 const tasks = useTasksStore()
 const session = useSessionStore()
-const { visible } = storeToRefs(tasks)
+const { visible, sort } = storeToRefs(tasks)
+
+/**
+ * Заголовки таблицы. Сортируемые несут поле — по нему строится
+ * кнопка; остальные остаются подписями.
+ *
+ * Исполнителя и название сортировать нельзя: сервер такого порядка
+ * не поддерживает, а сортировать одну загруженную страницу на клиенте
+ * значило бы врать при пагинации.
+ */
+const columns: { label: string; field?: SortField; right?: boolean }[] = [
+  { label: 'ID' },
+  { label: 'ЗАДАЧА' },
+  { label: 'ТИП', field: 'type' },
+  { label: 'ИСПОЛНИТЕЛЬ' },
+  { label: 'СТАТУС', field: 'status' },
+  { label: 'ПРИОРИТЕТ', field: 'priority' },
+  { label: 'СОЗДАНА', field: 'createdAt', right: true },
+]
+
+/** Поля сортировки для выпадающего списка на узком экране. */
+const sortOptions: { field: SortField; label: string }[] = [
+  { field: 'priority', label: 'Приоритет' },
+  { field: 'status', label: 'Статус' },
+  { field: 'type', label: 'Тип' },
+  { field: 'createdAt', label: 'Дата создания' },
+]
+
+function pickSort(event: Event): void {
+  tasks.setSort((event.target as HTMLSelectElement).value as SortField)
+}
+
+function toggleOrder(): void {
+  tasks.setSort(sort.value.field, sort.value.order === 'asc' ? 'desc' : 'asc')
+}
 </script>
 
 <template>
   <div class="tk-fade table">
     <div class="table__head" role="row">
-      <span>ID</span>
-      <span>ЗАДАЧА</span>
-      <span>ТИП</span>
-      <span>ИСПОЛНИТЕЛЬ</span>
-      <span>СТАТУС</span>
-      <span>ПРИОРИТЕТ</span>
-      <span class="table__right">СОЗДАНА</span>
+      <template v-for="column in columns" :key="column.label">
+        <button
+          v-if="column.field"
+          type="button"
+          class="tk-plain sorter"
+          :class="{ 'sorter--active': sort.field === column.field, 'sorter--right': column.right }"
+          :aria-sort="
+            sort.field === column.field
+              ? sort.order === 'asc'
+                ? 'ascending'
+                : 'descending'
+              : 'none'
+          "
+          @click="tasks.setSort(column.field)"
+        >
+          {{ column.label }}
+          <!-- Стрелка только у активной колонки: значок на каждой
+               превратил бы шапку в частокол. -->
+          <svg
+            v-if="sort.field === column.field"
+            class="sorter__arrow"
+            :class="{ 'sorter__arrow--desc': sort.order === 'desc' }"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.6"
+          >
+            <path d="M12 5v14M6.5 11.5L12 6l5.5 5.5" />
+          </svg>
+        </button>
+        <span v-else :class="{ 'table__right': column.right }">{{ column.label }}</span>
+      </template>
+    </div>
+
+    <!-- На узком экране шапка скрыта, а строки становятся карточками —
+         сортировать кликом по колонке там негде. -->
+    <div class="sortbar">
+      <span class="sortbar__label">Сортировка</span>
+      <select class="sortbar__select" :value="sort.field" @change="pickSort">
+        <option v-for="option in sortOptions" :key="option.field" :value="option.field">
+          {{ option.label }}
+        </option>
+      </select>
+      <button
+        type="button"
+        class="tk-tap tk-plain sortbar__order"
+        :title="sort.order === 'asc' ? 'По возрастанию' : 'По убыванию'"
+        @click="toggleOrder"
+      >
+        <svg
+          class="sorter__arrow"
+          :class="{ 'sorter__arrow--desc': sort.order === 'desc' }"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.6"
+        >
+          <path d="M12 5v14M6.5 11.5L12 6l5.5 5.5" />
+        </svg>
+      </button>
     </div>
 
     <button
@@ -84,6 +172,100 @@ const { visible } = storeToRefs(tasks)
   overflow: hidden;
 }
 
+/* Заголовок-кнопка: выглядит как подпись, но кликается и несёт стрелку
+   направления. Только у сортируемых колонок — по названию и исполнителю
+   сервер порядок не строит. */
+.sorter {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  white-space: nowrap;
+}
+
+.sorter:hover {
+  color: rgba(233, 233, 237, 0.75);
+}
+
+.sorter--active {
+  color: var(--accent-ink);
+}
+
+.sorter--right {
+  justify-content: flex-end;
+}
+
+.sorter__arrow {
+  width: 11px;
+  height: 11px;
+  flex: none;
+  transition: transform 0.16s;
+}
+
+.sorter__arrow--desc {
+  transform: rotate(180deg);
+}
+
+/* На широком экране сортировку задаёт шапка таблицы — панель не нужна. */
+.sortbar {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.sortbar__label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--ink-45);
+}
+
+.sortbar__select {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 0 8px;
+  background: var(--fill-soft);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 600;
+  outline: none;
+}
+
+.sortbar__select:focus {
+  border-color: var(--accent-border);
+}
+
+.sortbar__order {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--r-md);
+  background: var(--fill-soft);
+  border: 1px solid var(--line-strong);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-70);
+}
+
+@media (pointer: coarse) {
+  .sortbar__select,
+  .sortbar__order {
+    height: 42px;
+  }
+
+  .sortbar__order {
+    width: 42px;
+  }
+}
+
 /* Планшет и небольшой десктоп: семь колонок уже не помещаются, но
    карточная раскладка ещё избыточна — таблица уезжает в горизонтальную
    прокрутку.
@@ -105,6 +287,14 @@ const { visible } = storeToRefs(tasks)
 
   .table__head {
     display: none;
+  }
+
+  /* Кликать по колонкам больше негде — показываем выбор списком.
+     Растягиваем на всю ширину сетки, чтобы он не встал карточкой
+     в один ряд с задачами. */
+  .sortbar {
+    display: flex;
+    grid-column: 1 / -1;
   }
 
   .table__row {

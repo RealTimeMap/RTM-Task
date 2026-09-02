@@ -15,6 +15,8 @@ import { useToastStore } from '../stores/toast'
 import {
   PRIORITY_ORDER,
   STATUS_TITLES,
+  TYPE_ORDER,
+  TYPE_TITLES,
   TYPE_TONES,
   priorityTone,
   shortDate,
@@ -27,6 +29,7 @@ import {
   isInRework,
   type TaskPriority,
   type TaskStatus,
+  type TaskType,
 } from '../types/task'
 
 const tasks = useTasksStore()
@@ -197,6 +200,16 @@ async function pickStatus(status: TaskStatus): Promise<void> {
   const updated = await tasks.changeStatus(task.id, status)
   if (updated) {
     toast.show(`${taskCode(updated.id)} → ${STATUS_TITLES[updated.status]}`)
+  }
+}
+
+async function pickType(type: TaskType): Promise<void> {
+  const task = selected.value
+  if (!task || task.type === type) return
+
+  const updated = await tasks.update(task.id, { type })
+  if (updated) {
+    toast.show(`${taskCode(updated.id)}: тип — ${TYPE_TITLES[updated.type]}`)
   }
 }
 
@@ -407,6 +420,25 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
           <div v-for="(row, index) in meta" :key="row.label" class="meta__row" :class="{ 'meta__row--divided': index > 0 }">
             <span class="meta__label">{{ row.label }}</span>
             <span class="meta__value" :style="{ color: row.ink }">{{ row.value }}</span>
+          </div>
+        </section>
+
+        <section>
+          <h3 class="dialog__label">ТИП</h3>
+          <!-- Типов пять — в ряд не помещаются, поэтому с переносом,
+               как в форме создания. -->
+          <div class="type-grid">
+            <button
+              v-for="option in TYPE_ORDER"
+              :key="option"
+              class="tk-tap tk-plain option option--type"
+              :class="{ 'option--active': selected.type === option }"
+              :disabled="!canEdit || selected.status === 'complete'"
+              @click="pickType(option)"
+            >
+              <span class="option__dot" :style="{ background: TYPE_TONES[option].dot }" />
+              {{ TYPE_TITLES[option] }}
+            </button>
           </div>
         </section>
 
@@ -730,6 +762,22 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
 .priority-row {
   display: flex;
   gap: 7px;
+}
+
+/* Типы переносятся по строкам: пять кнопок в узкой колонке в один ряд
+   не помещаются. Растут от содержимого, а не делят строку поровну —
+   иначе перенесённая кнопка растянулась бы на всю ширину. */
+.type-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.option--type {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0 10px;
+  font-size: 11.5px;
 }
 
 .option {

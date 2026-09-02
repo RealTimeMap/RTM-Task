@@ -92,6 +92,33 @@ export interface TaskListResponse {
   offset: number
 }
 
+/**
+ * Поля сортировки списка. Значения совпадают с доменом
+ * (internal/domain/task/filter.go — SortField).
+ */
+export type SortField = 'createdAt' | 'priority' | 'status' | 'type'
+export type SortOrder = 'asc' | 'desc'
+
+export interface TaskSort {
+  field: SortField
+  order: SortOrder
+}
+
+/**
+ * Направление, в котором поле читается естественно.
+ *
+ * Свежие задачи интереснее старых, поэтому дата убывает. Приоритет,
+ * статус и тип — шкалы с осмысленным началом (важное, новое, первый
+ * тип), их читают по возрастанию. Дублирует defaultOrder бэкенда,
+ * чтобы первый клик по колонке давал ожидаемый порядок без запроса.
+ */
+export function defaultSortOrder(field: SortField): SortOrder {
+  return field === 'createdAt' ? 'desc' : 'asc'
+}
+
+/** Порядок списка по умолчанию — тот же, что отдаёт сервер без параметров. */
+export const DEFAULT_SORT: TaskSort = { field: 'priority', order: 'asc' }
+
 export interface TaskFilters {
   status?: TaskStatus
   type?: TaskType
@@ -99,6 +126,8 @@ export interface TaskFilters {
   creatorId?: number
   assigneeId?: number
   unassigned?: boolean
+  sort?: SortField
+  order?: SortOrder
   limit?: number
   offset?: number
 }

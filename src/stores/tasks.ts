@@ -11,14 +11,96 @@ import {
 } from '../api/socket'
 import type {
   CreateTaskPayload,
+  SortField,
+  SortOrder,
   Task,
   TaskFilters,
+  TaskSort,
   TaskStatus,
   TaskType,
   TaskPriority,
   UpdateTaskPayload,
 } from '../types/task'
-import { STATUS_ORDER } from '../types/task'
+import { DEFAULT_SORT, STATUS_ORDER, defaultSortOrder } from '../types/task'
+// Порядок типов — часть представления: он же задаёт последовательность
+// в фильтрах и форме создания.
+import { TYPE_ORDER } from '../lib/presentation'
+
+/**
+ * Ранг задачи по выбранному полю.
+ *
+ * Статус и тип упорядочены по смыслу, а не по алфавиту: жизненный цикл
+ * идёт new → working → review → complete, и по алфавиту complete
+ * оказался бы первым. Повторяет CASE-выражения репозитория.
+ */
+function sortRank(task: Task, field: SortField): number {
+  switch (field) {
+    case 'priority':
+      return task.priority
+    case 'status':
+      return STATUS_ORDER.indexOf(task.status)
+    case 'type':
+      return TYPE_ORDER.indexOf(task.type)
+    case 'createdAt':
+      return Date.parse(task.createdAt) || 0
+  }
+}
+
+/**
+ * Сравнение задач в выбранном порядке.
+ *
+ * Нужно, чтобы порядок держался между загрузками: сортирует сервер, но
+ * push-события приносят задачи по одной, и без локального сравнения
+ * новая задача вставала бы в начало списка, а изменившая приоритет
+ * оставалась бы на прежнем месте.
+ *
+ * Второй ключ — id по убыванию, как и в запросе: при равных значениях
+ * поля порядок иначе зависел бы от устойчивости сортировки.
+ */
+function compareTasks(a: Task, b: Task, sort: TaskSort): number {
+  const diff = sortRank(a, sort.field) - sortRank(b, sort.field)
+  if (diff !== 0) {
+    return sort.order === 'asc' ? diff : -diff
+  }
+  return b.id - a.id
+}
+
+/** Ключ, под которым сохраняется выбранный порядок списка. */
+const SORT_STORAGE_KEY = 'rtm-task:sort'
+
+/**
+ * Читает сохранённый порядок.
+ *
+ * Значение приходит из localStorage — то есть из внешнего мира: его
+ * могли испортить руками или оставить от прежней версии, поэтому поля
+ * проверяются, а не берутся на веру.
+ */
+function restoreSort(): TaskSort {
+  try {
+    const raw = localStorage.getItem(SORT_STORAGE_KEY)
+    if (!raw) return DEFAULT_SORT
+
+    const parsed = JSON.parse(raw) as Partial<TaskSort>
+    const fields: SortField[] = ['createdAt', 'priority', 'status', 'type']
+    const orders: SortOrder[] = ['asc', 'desc']
+
+    if (!parsed.field || !fields.includes(parsed.field)) return DEFAULT_SORT
+    if (!parsed.order || !orders.includes(parsed.order)) return DEFAULT_SORT
+
+    return { field: parsed.field, order: parsed.order }
+  } catch {
+    // Недоступный или сломанный localStorage не должен мешать работе.
+    return DEFAULT_SORT
+  }
+}
+
+function persistSort(sort: TaskSort): void {
+  try {
+    localStorage.setItem(SORT_STORAGE_KEY, JSON.stringify(sort))
+  } catch {
+    // Приватный режим и переполненное хранилище — не повод падать.
+  }
+}
 
 export type ViewMode = 'board' | 'list'
 export type ScopeMode = 'mine' | 'all'
@@ -37,6 +119,12 @@ export const useTasksStore = defineStore('tasks', () => {
   const query = ref('')
   const typeFilter = ref<TaskType | 'all'>('all')
   const statusFilter = ref<TaskStatus | 'all'>('all')
+
+  /**
+   * Порядок списка. Сортирует сервер: при пагинации сортировка на
+   * клиенте упорядочила бы только загруженную страницу.
+   */
+  const sort = ref<TaskSort>(restoreSort())
 
   const selectedId = ref<number | null>(null)
   const connection = ref<ConnectionState>('idle')
@@ -107,7 +195,9 @@ export const useTasksStore = defineStore('tasks', () => {
   function upsert(task: Task): void {
     const index = items.value.findIndex((item) => item.id === task.id)
     if (index === -1) {
-      items.value = [task, ...items.value]
+      // Место новой задачи определяет выбранный порядок, а не момент
+      // её появления: иначе она встала бы в начало любого списка.
+      items.value = insertSorted(items.value, task)
       total.value += 1
       return
     }
@@ -117,12 +207,28 @@ export const useTasksStore = defineStore('tasks', () => {
     const current = items.value[index]
     if (current.version > task.version) return
 
-    items.value[index] = {
+    const merged = {
       ...task,
       checklistTotal: task.checklistTotal ?? current.checklistTotal,
       checklistDone: task.checklistDone ?? current.checklistDone,
       commentCount: task.commentCount ?? current.commentCount,
     }
+
+    // Изменение могло затронуть поле сортировки — тогда задача меняет
+    // место. Пересортировка всего списка здесь дешевле, чем поиск
+    // нового индекса вручную: набор невелик и уже упорядочен.
+    const moved = sortRank(current, sort.value.field) !== sortRank(merged, sort.value.field)
+    items.value[index] = merged
+    if (moved) {
+      items.value = [...items.value].sort((a, b) => compareTasks(a, b, sort.value))
+    }
+  }
+
+  /** Вставляет задачу на её место в уже упорядоченном списке. */
+  function insertSorted(list: Task[], task: Task): Task[] {
+    const at = list.findIndex((item) => compareTasks(task, item, sort.value) < 0)
+    if (at === -1) return [...list, task]
+    return [...list.slice(0, at), task, ...list.slice(at)]
   }
 
   /**
@@ -161,7 +267,11 @@ export const useTasksStore = defineStore('tasks', () => {
   }
 
   function baseFilters(): TaskFilters {
-    const filters: TaskFilters = { limit: 100 }
+    const filters: TaskFilters = {
+      limit: 100,
+      sort: sort.value.field,
+      order: sort.value.order,
+    }
     if (scope.value === 'mine' && viewerId !== null) {
       filters.assigneeId = viewerId
     }
@@ -186,6 +296,34 @@ export const useTasksStore = defineStore('tasks', () => {
   async function setScope(next: ScopeMode): Promise<void> {
     if (scope.value === next) return
     scope.value = next
+    await load()
+  }
+
+  /**
+   * Переключает сортировку списка.
+   *
+   * Повторный выбор того же поля разворачивает направление — привычное
+   * поведение таблицы. Явное направление задаёт его напрямую: им
+   * пользуется выпадающий список, где реверса нет.
+   */
+  async function setSort(field: SortField, order?: SortOrder): Promise<void> {
+    const next: TaskSort =
+      order !== undefined
+        ? { field, order }
+        : {
+            field,
+            order:
+              sort.value.field === field
+                ? sort.value.order === 'asc'
+                  ? 'desc'
+                  : 'asc'
+                : defaultSortOrder(field),
+          }
+
+    if (next.field === sort.value.field && next.order === sort.value.order) return
+
+    sort.value = next
+    persistSort(next)
     await load()
   }
 
@@ -372,6 +510,7 @@ export const useTasksStore = defineStore('tasks', () => {
     error,
     view,
     scope,
+    sort,
     query,
     typeFilter,
     statusFilter,
@@ -388,6 +527,7 @@ export const useTasksStore = defineStore('tasks', () => {
     completedCount,
     load,
     setScope,
+    setSort,
     connect,
     disconnect,
     create,
