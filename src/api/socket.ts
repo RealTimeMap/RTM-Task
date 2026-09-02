@@ -23,6 +23,14 @@ export const TaskEvents = {
   Assigned: 'taskAssigned',
   Unassigned: 'taskUnassigned',
   Deleted: 'taskDeleted',
+
+  CommentAdded: 'taskCommentAdded',
+  CommentUpdated: 'taskCommentUpdated',
+  CommentDeleted: 'taskCommentDeleted',
+
+  ChecklistAdded: 'taskChecklistAdded',
+  ChecklistUpdated: 'taskChecklistUpdated',
+  ChecklistDeleted: 'taskChecklistDeleted',
 } as const
 
 export type TaskEventName = (typeof TaskEvents)[keyof typeof TaskEvents]

@@ -10,11 +10,13 @@ import TaskBoard from './components/TaskBoard.vue'
 import TaskDialog from './components/TaskDialog.vue'
 import TaskList from './components/TaskList.vue'
 import ToastBar from './components/ui/ToastBar.vue'
+import { useDiscussionStore } from './stores/discussion'
 import { useSessionStore } from './stores/session'
 import { useTasksStore } from './stores/tasks'
 
 const session = useSessionStore()
 const tasks = useTasksStore()
+const discussion = useDiscussionStore()
 
 const { isAuthenticated, failure } = storeToRefs(session)
 const { view, loading, error } = storeToRefs(tasks)
@@ -25,6 +27,9 @@ const booting = ref(true)
 /** Поднимает realtime и список задач для вошедшего сотрудника. */
 async function startWorkspace(staffId: number): Promise<void> {
   tasks.connect(staffId)
+  // Подписка на обсуждение вешается на тот же сокет — после connect,
+  // иначе подписываться было бы не на что.
+  discussion.subscribe()
   await tasks.load()
 }
 
@@ -43,6 +48,7 @@ watch(
   () => session.staffId,
   async (staffId, previous) => {
     if (previous !== null) {
+      discussion.close()
       tasks.disconnect()
     }
     if (staffId !== null) {

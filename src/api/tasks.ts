@@ -1,10 +1,15 @@
 import { request } from './client'
 import type {
+  ChecklistItem,
+  ChecklistResponse,
+  Comment,
+  CommentListResponse,
   CreateTaskPayload,
   Task,
   TaskFilters,
   TaskListResponse,
   TaskStatus,
+  UpdateChecklistItemPayload,
   UpdateTaskPayload,
 } from '../types/task'
 
@@ -47,5 +52,55 @@ export const tasksApi = {
 
   remove(id: number): Promise<void> {
     return request<void>(`/tasks/${id}`, { method: 'DELETE' })
+  },
+}
+
+/**
+ * Обсуждение и чек-лист живут вложенными в задачу: без неё они
+ * не существуют, и адреса это отражают.
+ */
+export const commentsApi = {
+  list(taskId: number): Promise<CommentListResponse> {
+    return request<CommentListResponse>(`/tasks/${taskId}/comments`)
+  },
+
+  create(taskId: number, body: string): Promise<Comment> {
+    return request<Comment>(`/tasks/${taskId}/comments`, { method: 'POST', body: { body } })
+  },
+
+  update(taskId: number, commentId: number, body: string): Promise<Comment> {
+    return request<Comment>(`/tasks/${taskId}/comments/${commentId}`, {
+      method: 'PATCH',
+      body: { body },
+    })
+  },
+
+  remove(taskId: number, commentId: number): Promise<void> {
+    return request<void>(`/tasks/${taskId}/comments/${commentId}`, { method: 'DELETE' })
+  },
+}
+
+export const checklistApi = {
+  list(taskId: number): Promise<ChecklistResponse> {
+    return request<ChecklistResponse>(`/tasks/${taskId}/checklist`)
+  },
+
+  create(taskId: number, title: string): Promise<ChecklistItem> {
+    return request<ChecklistItem>(`/tasks/${taskId}/checklist`, { method: 'POST', body: { title } })
+  },
+
+  update(
+    taskId: number,
+    itemId: number,
+    payload: UpdateChecklistItemPayload,
+  ): Promise<ChecklistItem> {
+    return request<ChecklistItem>(`/tasks/${taskId}/checklist/${itemId}`, {
+      method: 'PATCH',
+      body: payload,
+    })
+  },
+
+  remove(taskId: number, itemId: number): Promise<void> {
+    return request<void>(`/tasks/${taskId}/checklist/${itemId}`, { method: 'DELETE' })
   },
 }

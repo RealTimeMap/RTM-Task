@@ -95,7 +95,15 @@ export const useTasksStore = defineStore('tasks', () => {
     () => items.value.filter((task) => task.status === 'complete').length,
   )
 
-  /** Кладёт задачу в список или обновляет существующую. */
+  /**
+   * Кладёт задачу в список или обновляет существующую.
+   *
+   * Счётчики вложенных записей приходят только с загрузкой списка и
+   * чтением задачи: события изменения статуса их не несут. Поэтому
+   * отсутствующие поля не затирают уже известные — иначе каждое
+   * перетаскивание карточки гасило бы прогресс чек-листа до следующей
+   * полной загрузки.
+   */
   function upsert(task: Task): void {
     const index = items.value.findIndex((item) => item.id === task.id)
     if (index === -1) {
@@ -106,8 +114,30 @@ export const useTasksStore = defineStore('tasks', () => {
 
     // Событие может прийти после того, как мы уже применили более свежую
     // версию локально — старую запись не откатываем.
-    if (items.value[index].version > task.version) return
-    items.value[index] = task
+    const current = items.value[index]
+    if (current.version > task.version) return
+
+    items.value[index] = {
+      ...task,
+      checklistTotal: task.checklistTotal ?? current.checklistTotal,
+      checklistDone: task.checklistDone ?? current.checklistDone,
+      commentCount: task.commentCount ?? current.commentCount,
+    }
+  }
+
+  /**
+   * Обновляет счётчики карточки после изменения обсуждения или
+   * чек-листа: сама задача при этом не меняется, и её версия остаётся
+   * прежней — обычный upsert такое событие отбросил бы.
+   */
+  function applySummary(
+    id: number,
+    summary: { checklistTotal?: number; checklistDone?: number; commentCount?: number },
+  ): void {
+    const index = items.value.findIndex((item) => item.id === id)
+    if (index === -1) return
+
+    items.value[index] = { ...items.value[index], ...summary }
   }
 
   function remove(id: number): void {
@@ -370,6 +400,7 @@ export const useTasksStore = defineStore('tasks', () => {
     unassign,
     moveByStep,
     removeTask: remove_,
+    applySummary,
     select,
     clearError,
   }

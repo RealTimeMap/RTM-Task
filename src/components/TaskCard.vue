@@ -5,7 +5,13 @@ import AvatarBadge from './ui/AvatarBadge.vue'
 import TagChip from './ui/TagChip.vue'
 import { TYPE_TONES, priorityTone, taskCode } from '../lib/presentation'
 import { useSessionStore } from '../stores/session'
-import { nextStatus, previousStatus, type Task } from '../types/task'
+import {
+  hasChecklist,
+  isInRework,
+  nextStatus,
+  previousStatus,
+  type Task,
+} from '../types/task'
 
 const props = withDefaults(
   defineProps<{
@@ -53,6 +59,23 @@ const assignee = computed(() => session.memberById(props.task.assigneeId))
 const canGoForward = computed(() => nextStatus(props.task.status) !== null)
 
 const canGoBack = computed(() => previousStatus(props.task.status) !== null)
+
+/**
+ * Значки внизу карточки: прогресс плана и число реплик.
+ *
+ * Показываются только когда есть что показать — пустые «0/0» и «0»
+ * на каждой карточке превратили бы доску в таблицу счётчиков.
+ */
+const checklist = computed(() =>
+  hasChecklist(props.task)
+    ? { done: props.task.checklistDone ?? 0, total: props.task.checklistTotal ?? 0 }
+    : null,
+)
+
+const commentCount = computed(() => props.task.commentCount ?? 0)
+
+/** Задача с незакрытым замечанием — её видно, не открывая. */
+const inRework = computed(() => isInRework(props.task))
 </script>
 
 <template>
@@ -88,6 +111,31 @@ const canGoBack = computed(() => previousStatus(props.task.status) !== null)
         />
       </div>
       <h3 class="card__title">{{ task.title }}</h3>
+
+      <div v-if="inRework || checklist || commentCount" class="marks">
+        <span v-if="inRework" class="mark mark--rework" title="Задача возвращена в доработку">
+          ДОРАБОТКА
+        </span>
+
+        <span
+          v-if="checklist"
+          class="mark"
+          :class="{ 'mark--complete': checklist.done === checklist.total }"
+          :title="`Чек-лист: ${checklist.done} из ${checklist.total}`"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <path d="M4 7l2.5 2.5L11 5M4 16l2.5 2.5L11 14M14 8h6M14 17h6" />
+          </svg>
+          {{ checklist.done }}/{{ checklist.total }}
+        </span>
+
+        <span v-if="commentCount" class="mark" :title="`Комментариев: ${commentCount}`">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <path d="M20 12a7 7 0 0 1-7 7H8l-4 3v-4.6A7 7 0 0 1 4 12a7 7 0 0 1 7-7h2a7 7 0 0 1 7 7z" />
+          </svg>
+          {{ commentCount }}
+        </span>
+      </div>
     </div>
 
     <footer class="card__footer">
@@ -198,6 +246,47 @@ const canGoBack = computed(() => previousStatus(props.task.status) !== null)
   line-height: 1.35;
   margin: 0;
   text-wrap: pretty;
+}
+
+/* Значки под заголовком: прогресс плана, число реплик, метка доработки.
+   Ряд появляется только когда есть что показать. */
+.marks {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--r-sm);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--ink-45);
+  font-size: 10.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.mark svg {
+  width: 11px;
+  height: 11px;
+}
+
+/* Закрытый чек-лист подсвечивается: «5/5» среди серых значков читается
+   как готовность, а не как ещё один счётчик. */
+.mark--complete {
+  background: var(--success-bg);
+  color: var(--success-ink);
+}
+
+.mark--rework {
+  background: var(--warning-bg);
+  color: var(--warning-ink);
+  letter-spacing: 0.06em;
 }
 
 .card__footer {

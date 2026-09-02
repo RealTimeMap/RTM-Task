@@ -6,6 +6,9 @@ import AvatarBadge from './ui/AvatarBadge.vue'
 import MarkdownEditor from './ui/MarkdownEditor.vue'
 import MarkdownText from './ui/MarkdownText.vue'
 import TagChip from './ui/TagChip.vue'
+import TaskChecklist from './TaskChecklist.vue'
+import TaskComments from './TaskComments.vue'
+import { useDiscussionStore } from '../stores/discussion'
 import { useSessionStore } from '../stores/session'
 import { useTasksStore } from '../stores/tasks'
 import { useToastStore } from '../stores/toast'
@@ -29,6 +32,7 @@ import {
 const tasks = useTasksStore()
 const session = useSessionStore()
 const toast = useToastStore()
+const discussion = useDiscussionStore()
 
 const { selected } = storeToRefs(tasks)
 const { members, permissions, staff } = storeToRefs(session)
@@ -45,11 +49,19 @@ const sendingRework = ref(false)
 
 // Смена задачи закрывает вспомогательные панели: черновик описания
 // относится к конкретной задаче и на другую не переносится.
-watch(selected, () => {
+watch(selected, (task) => {
   assigneePickerOpen.value = false
   editingDescription.value = false
   descriptionDraft.value = ''
   closeRework()
+
+  // Обсуждение и чек-лист грузятся под открытую задачу: держать их
+  // для всей доски незачем.
+  if (task) {
+    void discussion.open(task.id)
+  } else {
+    discussion.close()
+  }
 })
 
 function startEditDescription(): void {
@@ -114,6 +126,18 @@ const rework = computed(() => {
     at: task.reworkAt ? shortDate(task.reworkAt) : '',
   }
 })
+
+/**
+ * Комментировать можно и завершённую задачу: вопросы к результату
+ * возникают именно после сдачи, а правку самой задачи это не открывает.
+ */
+const canComment = computed(() => canEdit.value)
+
+/**
+ * Чек-лист закрытой задачи только для чтения: план работ относится
+ * к незакрытой задаче, как и остальное её редактирование.
+ */
+const canEditChecklist = computed(() => canEdit.value && selected.value?.status !== 'complete')
 
 /** Отправить в доработку можно завершённую задачу — и только тому, кто её ведёт. */
 const canRework = computed(() => canEdit.value && !!selected.value && canSendToRework(selected.value))
@@ -319,6 +343,10 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
               placeholder="Описание не заполнено"
             />
           </section>
+
+          <!-- Обсуждение под описанием: сначала что делать, потом
+               разговор об этом. -->
+          <TaskComments :can-comment="canComment" />
         </div>
 
         <aside class="tk-scroll dialog__side">
@@ -370,6 +398,10 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
             </div>
           </template>
         </section>
+
+        <!-- Чек-лист рядом с управлением: это план работ, а не текст
+             задачи, и отмечают пункты по ходу дела. -->
+        <TaskChecklist :can-edit="canEditChecklist" />
 
         <section class="meta">
           <div v-for="(row, index) in meta" :key="row.label" class="meta__row" :class="{ 'meta__row--divided': index > 0 }">

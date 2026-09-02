@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 
 import AvatarBadge from './ui/AvatarBadge.vue'
@@ -15,7 +15,13 @@ import {
   priorityTone,
   taskCode,
 } from '../lib/presentation'
-import { Priority, type TaskPriority, type TaskType } from '../types/task'
+import {
+  MAX_CHECKLIST_ITEMS,
+  MAX_CHECKLIST_TITLE,
+  Priority,
+  type TaskPriority,
+  type TaskType,
+} from '../types/task'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: [] }>()
@@ -32,6 +38,41 @@ const type = ref<TaskType>('bug')
 const priority = ref<TaskPriority>(Priority.Medium)
 const assigneeId = ref<number | null>(null)
 const submitting = ref(false)
+
+/**
+ * Заготовка чек-листа. Хранится как список строк, а не как сущности:
+ * пункты ещё не существуют — задачи, к которой их привязать, пока нет.
+ */
+const checklist = ref<string[]>([])
+const checklistDraft = ref('')
+const checklistInput = ref<HTMLInputElement | null>(null)
+
+const checklistFull = computed(() => checklist.value.length >= MAX_CHECKLIST_ITEMS)
+
+/**
+ * Добавляет пункт в заготовку.
+ *
+ * Повторы отбрасываются: две одинаковые строки в плане работ — почти
+ * всегда случайное двойное нажатие, а не осознанный дубль.
+ */
+async function addChecklistItem(): Promise<void> {
+  const title = checklistDraft.value.trim()
+  if (!title || checklistFull.value) return
+  if (checklist.value.includes(title)) {
+    checklistDraft.value = ''
+    return
+  }
+
+  checklist.value = [...checklist.value, title]
+  checklistDraft.value = ''
+  // Фокус остаётся в поле: пункты обычно вводят подряд.
+  await nextTick()
+  checklistInput.value?.focus()
+}
+
+function removeChecklistItem(index: number): void {
+  checklist.value = checklist.value.filter((_, i) => i !== index)
+}
 
 const typeOptions: TaskType[] = TYPE_ORDER
 
@@ -53,8 +94,21 @@ watch(
     type.value = 'feature'
     priority.value = Priority.Medium
     assigneeId.value = null
+    checklist.value = []
+    checklistDraft.value = ''
   },
 )
+
+/** Пункты чек-листа вместе с недобавленным черновиком. */
+function pendingChecklist(): string[] | undefined {
+  const draft = checklistDraft.value.trim()
+  const items =
+    draft && !checklist.value.includes(draft) && !checklistFull.value
+      ? [...checklist.value, draft]
+      : checklist.value
+
+  return items.length > 0 ? items : undefined
+}
 
 async function submit(): Promise<void> {
   if (!canSubmit.value) return
@@ -67,6 +121,9 @@ async function submit(): Promise<void> {
       type: type.value,
       priority: priority.value,
       assigneeId: assigneeId.value,
+      // Незакоммиченный ввод тоже уходит: пользователь набрал пункт и
+      // нажал «Создать», не нажав «плюс» — терять его было бы обидно.
+      checklist: pendingChecklist(),
     })
 
     if (created) {
@@ -107,6 +164,54 @@ async function submit(): Promise<void> {
               :rows="8"
               placeholder="Шаги воспроизведения или контекст. Поддерживается разметка: **жирный**, `код`, списки"
             />
+          </div>
+
+          <!-- Чек-лист прямо в форме: план работ обычно известен в момент
+               заведения задачи, и заводить пункты отдельными запросами
+               после создания — лишний круг. -->
+          <div class="field">
+            <span class="field__label">ЧЕК-ЛИСТ</span>
+
+            <ul v-if="checklist.length" class="plan">
+              <li v-for="(item, index) in checklist" :key="`${index}-${item}`" class="plan__item">
+                <span class="plan__marker" />
+                <span class="plan__title">{{ item }}</span>
+                <button
+                  type="button"
+                  class="tk-tap tk-plain plan__remove"
+                  title="Убрать пункт"
+                  @click="removeChecklistItem(index)"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M6 6l12 12M18 6L6 18" />
+                  </svg>
+                </button>
+              </li>
+            </ul>
+
+            <div class="plan__add">
+              <input
+                ref="checklistInput"
+                v-model="checklistDraft"
+                class="field__input"
+                :maxlength="MAX_CHECKLIST_TITLE"
+                :disabled="checklistFull"
+                :placeholder="
+                  checklistFull
+                    ? `Предел — ${MAX_CHECKLIST_ITEMS} пунктов`
+                    : 'Что нужно сделать. Enter — добавить'
+                "
+                @keydown.enter.prevent="addChecklistItem"
+              />
+              <button
+                type="button"
+                class="tk-tap tk-plain plan__submit"
+                :disabled="checklistFull || !checklistDraft.trim()"
+                @click="addChecklistItem"
+              >
+                Добавить
+              </button>
+            </div>
           </div>
         </div>
 
@@ -407,6 +512,107 @@ async function submit(): Promise<void> {
   height: 6px;
   flex: none;
   border-radius: 50%;
+}
+
+/* Заготовка чек-листа. Пункты ещё не существуют на сервере, поэтому
+   без отметок «выполнено» — только состав списка. */
+.plan {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.plan__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  border-radius: var(--r-sm);
+  padding: 2px 4px;
+}
+
+.plan__item:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.plan__marker {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border-radius: 3px;
+  border: 1.5px solid var(--line-strong);
+}
+
+.plan__title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(233, 233, 237, 0.85);
+  word-break: break-word;
+}
+
+.plan__remove {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-40);
+  opacity: 0;
+}
+
+.plan__item:hover .plan__remove,
+.plan__remove:focus-visible {
+  opacity: 1;
+}
+
+.plan__remove:hover {
+  color: var(--danger-ink);
+}
+
+.plan__remove svg {
+  width: 11px;
+  height: 11px;
+}
+
+.plan__add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.plan__submit {
+  flex: none;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--r-sm);
+  color: var(--accent-ink);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.plan__submit:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+@media (pointer: coarse) {
+  .plan__remove {
+    opacity: 1;
+    width: 32px;
+    height: 32px;
+  }
+
+  .plan__submit {
+    height: 38px;
+  }
 }
 
 .assignees {

@@ -34,6 +34,55 @@ export interface Task {
   reworkNote?: string
   reworkById?: number | null
   reworkAt?: string | null
+
+  /**
+   * Сводка по вложенным записям. Приходит только при загрузке списка
+   * и чтении задачи: события изменения статуса её не несут, поэтому
+   * поля опциональны, а не обязательные нули.
+   */
+  checklistTotal?: number
+  checklistDone?: number
+  commentCount?: number
+}
+
+/** Комментарий к задаче. */
+export interface Comment {
+  id: number
+  taskId: number
+  authorId: number
+  body: string
+  editedAt?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CommentListResponse {
+  items: Comment[]
+  total: number
+}
+
+/** Пункт чек-листа задачи. */
+export interface ChecklistItem {
+  id: number
+  taskId: number
+  title: string
+  position: number
+  done: boolean
+  doneAt?: string | null
+  doneById?: number | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ChecklistResponse {
+  items: ChecklistItem[]
+  total: number
+  done: number
+}
+
+export interface UpdateChecklistItemPayload {
+  title?: string
+  done?: boolean
 }
 
 export interface TaskListResponse {
@@ -60,6 +109,8 @@ export interface CreateTaskPayload {
   type: TaskType
   priority?: TaskPriority
   assigneeId?: number | null
+  /** Заготовка чек-листа, заполняемая прямо в форме создания. */
+  checklist?: string[]
 }
 
 export interface UpdateTaskPayload {
@@ -92,6 +143,26 @@ export function nextStatus(status: TaskStatus): TaskStatus | null {
   const index = STATUS_ORDER.indexOf(status)
   const target = STATUS_ORDER[index + 1]
   return target && canTransition(status, target) ? target : null
+}
+
+/**
+ * Ограничения совпадают с доменными: сервер отклонит выход за них,
+ * а UI гасит кнопку заранее, не отправляя заведомо неудачный запрос.
+ */
+export const MAX_COMMENT_LENGTH = 5000
+export const MAX_CHECKLIST_TITLE = 300
+export const MAX_CHECKLIST_ITEMS = 50
+
+/** Доля выполненных пунктов чек-листа, 0…1. Пустой список — ноль. */
+export function checklistProgress(task: Task): number {
+  const total = task.checklistTotal ?? 0
+  if (total === 0) return 0
+  return (task.checklistDone ?? 0) / total
+}
+
+/** У задачи есть чек-лист, который стоит показать на карточке. */
+export function hasChecklist(task: Task): boolean {
+  return (task.checklistTotal ?? 0) > 0
 }
 
 /** Задачу вернули в работу с замечанием, и оно ещё не снято. */
