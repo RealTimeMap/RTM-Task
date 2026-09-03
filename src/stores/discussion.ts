@@ -68,11 +68,11 @@ export const useDiscussionStore = defineStore('discussion', () => {
    * сервером после серии realtime-событий разрешается перечитыванием.
    */
   async function open(id: number): Promise<void> {
-    if (taskId.value === id && !loading.value) {
-      // Та же задача уже открыта — обновляем молча, без мигания списков.
-      void refresh(id)
-      return
-    }
+    // Та же задача уже открыта — списки актуальны, их поддерживают
+    // realtime-события. Перезагрузка здесь была бы не просто лишней:
+    // вызов open повторяется на каждое обновление задачи, и каждая
+    // перезагрузка порождала бы следующую.
+    if (taskId.value === id) return
 
     taskId.value = id
     comments.value = []

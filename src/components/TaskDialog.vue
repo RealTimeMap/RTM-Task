@@ -50,22 +50,33 @@ const reworkOpen = ref(false)
 const reworkDraft = ref('')
 const sendingRework = ref(false)
 
-// Смена задачи закрывает вспомогательные панели: черновик описания
-// относится к конкретной задаче и на другую не переносится.
-watch(selected, (task) => {
-  assigneePickerOpen.value = false
-  editingDescription.value = false
-  descriptionDraft.value = ''
-  closeRework()
+/*
+  Смена задачи закрывает вспомогательные панели: черновик описания
+  относится к конкретной задаче и на другую не переносится.
 
-  // Обсуждение и чек-лист грузятся под открытую задачу: держать их
-  // для всей доски незачем.
-  if (task) {
-    void discussion.open(task.id)
-  } else {
-    discussion.close()
-  }
-})
+  Следим за идентификатором, а не за объектом задачи. selected —
+  computed по списку, и любое обновление задачи (в том числе счётчиков,
+  которые проставляет сам стор обсуждения) отдаёт новую ссылку. Watch по
+  объекту принимал бы это за смену задачи и перезагружал обсуждение —
+  а перезагрузка снова обновляла бы счётчики, замыкая цикл запросов.
+*/
+watch(
+  () => selected.value?.id ?? null,
+  (id) => {
+    assigneePickerOpen.value = false
+    editingDescription.value = false
+    descriptionDraft.value = ''
+    closeRework()
+
+    // Обсуждение и чек-лист грузятся под открытую задачу: держать их
+    // для всей доски незачем.
+    if (id !== null) {
+      void discussion.open(id)
+    } else {
+      discussion.close()
+    }
+  },
+)
 
 function startEditDescription(): void {
   descriptionDraft.value = selected.value?.description ?? ''

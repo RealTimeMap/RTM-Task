@@ -243,7 +243,16 @@ export const useTasksStore = defineStore('tasks', () => {
     const index = items.value.findIndex((item) => item.id === id)
     if (index === -1) return
 
-    items.value[index] = { ...items.value[index], ...summary }
+    // Ничего не изменилось — не трогаем список. Новая ссылка на задачу
+    // разбудила бы всех, кто на неё смотрит, и открытое окно задачи
+    // перезагрузило бы обсуждение, снова вызвав эту функцию.
+    const current = items.value[index]
+    const same = (Object.keys(summary) as (keyof typeof summary)[]).every(
+      (key) => summary[key] === undefined || summary[key] === current[key],
+    )
+    if (same) return
+
+    items.value[index] = { ...current, ...summary }
   }
 
   function remove(id: number): void {
