@@ -357,10 +357,12 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
             />
           </section>
 
-          <!-- Обсуждение под описанием: сначала что делать, потом
-               разговор об этом. -->
-          <TaskComments :can-comment="canComment" />
         </div>
+
+        <!-- Обсуждение вынесено из левой колонки, хотя на широком экране
+             и стоит под описанием: только прямой ребёнок сетки можно
+             переставить в один столбец под управление задачей. -->
+        <TaskComments class="tk-scroll dialog__comments" :can-comment="canComment" />
 
         <aside class="tk-scroll dialog__side">
         <section>
@@ -414,7 +416,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
 
         <!-- Чек-лист рядом с управлением: это план работ, а не текст
              задачи, и отмечают пункты по ходу дела. -->
-        <TaskChecklist :can-edit="canEditChecklist" />
+        <TaskChecklist class="dialog__checklist" :can-edit="canEditChecklist" />
 
         <section class="meta">
           <div v-for="(row, index) in meta" :key="row.label" class="meta__row" :class="{ 'meta__row--divided': index > 0 }">
@@ -559,20 +561,44 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
 /* Две колонки: содержание задачи и её параметры.
    Каждая прокручивается сама — длинное описание не уносит вниз
    кнопки управления. */
+/*
+  Два столбца и две строки: слева описание, под ним обсуждение, справа
+  во всю высоту — параметры задачи.
+
+  Описание занимает ровно столько, сколько ему нужно (auto), а остаток
+  высоты забирает обсуждение — так переписка прокручивается сама, не
+  утягивая за собой заголовок и описание.
+*/
 .dialog__body {
   display: grid;
   grid-template-columns: minmax(0, 1.5fr) minmax(280px, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
   flex: 1;
 }
 
 .dialog__main {
+  grid-column: 1;
+  grid-row: 1;
   min-height: 0;
   overflow: auto;
   padding: 18px 20px 24px;
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.dialog__comments {
+  grid-column: 1;
+  grid-row: 2;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 20px 24px;
+}
+
+.dialog__side {
+  grid-column: 2;
+  grid-row: 1 / -1;
 }
 
 .dialog__side {
@@ -594,6 +620,10 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
     /* Прокрутка переезжает на общий контейнер: две независимо
        скроллящиеся области в одном столбце только мешают. */
     overflow: auto;
+    /* Колонки становятся секциями одного потока — это нужно, чтобы
+       переставлять их по order (см. ниже). */
+    display: flex;
+    flex-direction: column;
   }
 
   .dialog__main,
@@ -604,6 +634,48 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
   .dialog__side {
     border-left: 0;
     border-top: 1px solid var(--line);
+  }
+
+  /*
+    Обсуждение уезжает в самый низ, под управление задачей.
+
+    В два столбца оно стоит рядом с параметрами и друг другу не мешает,
+    но в одном столбце переписка растёт неограниченно — и чек-лист со
+    статусом оказались бы под ней. До плана работ пришлось бы
+    прокручивать всё обсуждение, хотя открывают задачу обычно ради него.
+  */
+  .dialog__main {
+    display: flex;
+    flex-direction: column;
+    order: 1;
+  }
+
+  .dialog__side {
+    order: 2;
+  }
+
+  .dialog__main,
+  .dialog__comments,
+  .dialog__side {
+    grid-column: auto;
+    grid-row: auto;
+    /* Флекс-колонка иначе сжимает области под доступную высоту, и их
+       содержимое вываливается наружу поверх соседних блоков: прокрутка
+       здесь на общем контейнере, а не внутри каждой области. */
+    flex: none;
+  }
+
+  .dialog__comments {
+    order: 3;
+    overflow: visible;
+    padding: 16px 20px 24px;
+    border-top: 1px solid var(--line);
+  }
+
+  /* Чек-лист поднимается к статусу: вместе они отвечают на вопрос
+     «что сейчас с задачей», а мета и настройки — уже подробности. */
+  .dialog__checklist {
+    order: -1;
   }
 }
 
@@ -633,10 +705,23 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
       max(20px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
   }
 
+  /* Обсуждение идёт последним — нижний отступ обходит домашнюю полосу,
+     иначе поле ввода упирается прямо в неё. */
+  .dialog__comments {
+    padding: 14px max(14px, env(safe-area-inset-right))
+      max(24px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
+  }
+
   /* Статусы в один столбец: две кнопки в ряд на узком экране
      обрезают подписи. */
   .status-grid {
     grid-template-columns: 1fr;
+  }
+
+  /* Типы по два в ряд: пять кнопок в столбец растянули бы окно,
+     а в одну строку подписи не помещаются. */
+  .type-grid .option--type {
+    flex: 1 1 calc(50% - 4px);
   }
 }
 

@@ -360,6 +360,44 @@ async function remove(id: number): Promise<void> {
   cursor: default;
 }
 
+/*
+  Узкий экран: аватар убирается, а действия переносятся под подпись.
+
+  Аватар съедает 36px ширины у каждой реплики — на телефоне это заметная
+  доля строки, а имя автора рядом и так написано. Кнопки «Изменить» и
+  «Удалить» при этом перестают тесниться в одну строку с датой.
+*/
+@media (max-width: 480px) {
+  .comment > :first-child {
+    display: none;
+  }
+
+  /* Действия остаются справа от подписи, а не переносятся отдельной
+     строкой: без аватара места хватает, а лишняя строка на каждую
+     реплику удлиняет и без того длинную ленту. */
+  .comment__head {
+    flex-wrap: nowrap;
+  }
+
+  .comment__author,
+  .comment__time {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .comment__action {
+    flex: none;
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .comment__action + .comment__action {
+    margin-left: 10px;
+  }
+}
+
 @media (pointer: coarse) {
   .composer__submit {
     height: 42px;
