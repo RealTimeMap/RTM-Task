@@ -197,17 +197,6 @@ const blockedHint = 'Недоступный переход'
       <p v-if="columnState(column.status) === 'blocked'" class="column__blocked">
         {{ blockedHint }}
       </p>
-
-      <button
-        v-if="permissions.canCreate && !dragging"
-        class="tk-tap tk-plain column__add"
-        @click="emit('create', column.status)"
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M12 5v14M5 12h14" />
-        </svg>
-        Добавить
-      </button>
     </section>
   </div>
 </template>
