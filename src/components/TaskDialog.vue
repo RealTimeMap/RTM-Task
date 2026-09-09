@@ -8,26 +8,39 @@ import MarkdownText from './ui/MarkdownText.vue'
 import TagChip from './ui/TagChip.vue'
 import TaskChecklist from './TaskChecklist.vue'
 import TaskComments from './TaskComments.vue'
+import BugReportPanel from './BugReportPanel.vue'
 import { useDiscussionStore } from '../stores/discussion'
 import { useSessionStore } from '../stores/session'
 import { useTasksStore } from '../stores/tasks'
 import { useToastStore } from '../stores/toast'
 import {
+  BUG_TAG_TITLES,
   PRIORITY_ORDER,
+  PROJECT_TITLES,
+  PROJECT_TONES,
   STATUS_TITLES,
   TYPE_ORDER,
   TYPE_TITLES,
   TYPE_TONES,
+  isNarrowScreen,
   priorityTone,
   shortDate,
   taskCode,
 } from '../lib/presentation'
+import { bugsApi, tasksApi } from '../api/tasks'
+import { ApiError, errorMessage } from '../api/client'
 import {
+  PROJECT_ORDER as PROJECT_OPTIONS,
   STATUS_ORDER,
+  canAttachBug,
   canSendToRework,
   canTransition,
+  hasBug,
   isInRework,
+  type Bug,
+  type BugDetail,
   type TaskPriority,
+  type TaskProject,
   type TaskStatus,
   type TaskType,
 } from '../types/task'
@@ -50,6 +63,145 @@ const reworkOpen = ref(false)
 const reworkDraft = ref('')
 const sendingRework = ref(false)
 
+/**
+ * Выбор бага для привязки.
+ *
+ * Перечень грузится по требованию — при открытии списка: он нужен
+ * только тому, кто прямо сейчас меняет привязку, а не каждому, кто
+ * открыл задачу.
+ */
+const bugPickerOpen = ref(false)
+const bugOptions = ref<Bug[]>([])
+const bugsLoading = ref(false)
+const bugsError = ref<string | null>(null)
+const bugsUnavailable = ref(false)
+
+/**
+ * Подробности привязанного бага: обстановка воспроизведения и логи.
+ *
+ * Грузятся отдельным запросом при открытии задачи — в списке задач их
+ * нет, а разработчику без них отчёт бесполезен: по одному номеру
+ * непонятно, что и где воспроизводить.
+ */
+const bugDetail = ref<BugDetail | null>(null)
+const bugDetailLoading = ref(false)
+const bugDetailError = ref<string | null>(null)
+
+/**
+ * Отчёт не загрузился из-за недоступности feedback-service.
+ *
+ * Отдельно от обычной ошибки: привязка бага к задаче никуда не делась,
+ * недоступен только сам отчёт — и повтор имеет смысл.
+ */
+const bugDetailUnavailable = ref(false)
+
+/**
+ * Открыт ли отчёт о баге — отдельное окно рядом с задачей.
+ *
+ * На широком экране открыт сразу: он стоит рядом с задачей и ничего не
+ * закрывает, а разработчик, открывший задачу с багом, пришёл именно за
+ * ним. На телефоне отчёт разворачивается во весь экран поверх задачи —
+ * открытый по умолчанию, он показал бы отчёт вместо самой задачи, и
+ * непонятно, что вообще нужно сделать. Поэтому там он свёрнут, а
+ * открывается кнопкой.
+ */
+const reportOpen = ref(!isNarrowScreen())
+
+async function loadBugDetail(taskId: number, bugId: number): Promise<void> {
+  // Подробности уже те, что нужны — второй запрос ничего не изменит.
+  if (bugDetail.value?.id === bugId) return
+
+  bugDetailLoading.value = true
+  bugDetailError.value = null
+  bugDetailUnavailable.value = false
+  try {
+    const detail = await tasksApi.bug(taskId)
+    // Пока грузили, могли открыть другую задачу — чужой ответ не наш.
+    if (selected.value?.id !== taskId) return
+    bugDetail.value = detail
+  } catch (err) {
+    if (selected.value?.id === taskId) {
+      bugDetailError.value = errorMessage(err)
+      bugDetailUnavailable.value = err instanceof ApiError && err.isUnavailable
+    }
+  } finally {
+    bugDetailLoading.value = false
+  }
+}
+
+/** Повторяет загрузку отчёта после сбоя сервиса. */
+async function retryBugDetail(): Promise<void> {
+  const task = selected.value
+  if (!task || typeof task.bugId !== 'number') return
+
+  // Сбрасываем то, что уже загружено: иначе loadBugDetail сочтёт
+  // подробности актуальными и второй раз не пойдёт.
+  bugDetail.value = null
+  await loadBugDetail(task.id, task.bugId)
+}
+
+/**
+ * Подробности следуют за задачей: открыли другую или сменили баг —
+ * перечитываем, отвязали — забываем.
+ */
+watch(
+  () => [selected.value?.id, selected.value?.bugId] as const,
+  ([taskId, bugId]) => {
+    if (!taskId || typeof bugId !== 'number') {
+      bugDetail.value = null
+      bugDetailError.value = null
+      return
+    }
+    void loadBugDetail(taskId, bugId)
+  },
+  { immediate: true },
+)
+
+async function openBugPicker(): Promise<void> {
+  bugPickerOpen.value = !bugPickerOpen.value
+  if (!bugPickerOpen.value || bugOptions.value.length > 0) return
+
+  bugsLoading.value = true
+  bugsError.value = null
+  bugsUnavailable.value = false
+  try {
+    const response = await bugsApi.list()
+    bugOptions.value = response.items
+  } catch (err) {
+    bugsError.value = errorMessage(err)
+    bugsUnavailable.value = err instanceof ApiError && err.isUnavailable
+  } finally {
+    bugsLoading.value = false
+  }
+}
+
+async function pickBug(bugId: number): Promise<void> {
+  const task = selected.value
+  if (!task) return
+
+  const updated = await tasks.attachBug(task.id, bugId)
+  if (updated) {
+    bugPickerOpen.value = false
+    // Привязанный баг ушёл из перечня свободных — убираем и у себя,
+    // чтобы он не предлагался снова до перезагрузки списка.
+    bugOptions.value = bugOptions.value.filter((item) => item.id !== bugId)
+    toast.show(`${taskCode(updated.id)}: привязан баг #${bugId}`)
+  }
+}
+
+async function dropBug(): Promise<void> {
+  const task = selected.value
+  if (!task) return
+
+  const updated = await tasks.detachBug(task.id)
+  if (updated) {
+    // Освобождённый баг может понадобиться снова — перечень
+    // перечитается при следующем открытии списка.
+    bugOptions.value = []
+    toast.show(`${taskCode(updated.id)}: баг отвязан`)
+  }
+}
+
 /*
   Смена задачи закрывает вспомогательные панели: черновик описания
   относится к конкретной задаче и на другую не переносится.
@@ -67,6 +219,11 @@ watch(
     editingDescription.value = false
     descriptionDraft.value = ''
     closeRework()
+    // Ref живёт дольше одной задачи: без сброса отчёт, закрытый в
+    // прошлой задаче, остался бы закрытым и в следующей — и наоборот,
+    // на телефоне открытый однажды отчёт встречал бы каждую новую
+    // задачу вместо неё самой.
+    reportOpen.value = !isNarrowScreen()
 
     // Обсуждение и чек-лист грузятся под открытую задачу: держать их
     // для всей доски незачем.
@@ -147,6 +304,19 @@ const rework = computed(() => {
  */
 const canComment = computed(() => canEdit.value)
 
+/** Привязанный баг задачи, если он есть. */
+const attachedBugId = computed(() =>
+  selected.value && hasBug(selected.value) ? selected.value.bugId : null,
+)
+
+/**
+ * Менять привязку можно, пока задача открыта и остаётся багом:
+ * сервер откажет и в завершённой задаче, и в задаче другого типа.
+ */
+const canManageBug = computed(
+  () => canEdit.value && !!selected.value && canAttachBug(selected.value),
+)
+
 /**
  * Чек-лист закрытой задачи только для чтения: план работ относится
  * к незакрытой задаче, как и остальное её редактирование.
@@ -224,6 +394,16 @@ async function pickType(type: TaskType): Promise<void> {
   }
 }
 
+async function pickProject(project: TaskProject): Promise<void> {
+  const task = selected.value
+  if (!task || task.project === project) return
+
+  const updated = await tasks.update(task.id, { project })
+  if (updated) {
+    toast.show(`${taskCode(updated.id)}: проект — ${PROJECT_TITLES[updated.project]}`)
+  }
+}
+
 async function pickPriority(priority: TaskPriority): Promise<void> {
   const task = selected.value
   if (!task) return
@@ -295,8 +475,13 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
 
 <template>
   <div v-if="selected" class="overlay" @click="tasks.select(null)">
-    <div
-      class="tk-rise dialog"
+    <!--
+      Ряд из двух окон. Высоту ряда задаёт задача, а отчёт растягивается
+      до неё: иначе рядом с высокой карточкой он висел бы узким столбиком.
+    -->
+    <div class="stage">
+      <div
+        class="tk-rise dialog"
       role="dialog"
       aria-modal="true"
       aria-label="Детали задачи"
@@ -456,6 +641,98 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
         </section>
 
         <section>
+          <h3 class="dialog__label">ПРОЕКТ</h3>
+          <div class="priority-row">
+            <button
+              v-for="option in PROJECT_OPTIONS"
+              :key="option"
+              class="tk-tap tk-plain option option--compact"
+              :class="{ 'option--active': selected.project === option }"
+              :disabled="!canEdit || selected.status === 'complete'"
+              @click="pickProject(option)"
+            >
+              <span class="option__dot" :style="{ background: PROJECT_TONES[option].dot }" />
+              {{ PROJECT_TITLES[option] }}
+            </button>
+          </div>
+        </section>
+
+        <!-- Баг из feedback-service: показывается только у задач типа
+             «баг» - привязать его к другой задаче нельзя. -->
+        <section v-if="selected.type === 'bug'" class="bug-section">
+          <h3 class="dialog__label">БАГ</h3>
+
+          <!-- Сам отчёт живёт в отдельном окне рядом: с логами он не
+               помещается в узкую колонку и растягивал бы карточку. Здесь
+               остаётся только строка привязки и кнопка, открывающая его. -->
+          <div v-if="attachedBugId" class="bug-linked">
+            <span class="bug-linked__code">#{{ attachedBugId }}</span>
+            <span class="bug-linked__note">В работе по этой задаче</span>
+            <button
+              v-if="canManageBug"
+              class="tk-tap tk-plain bug-linked__drop"
+              title="Отвязать баг"
+              @click="dropBug"
+            >
+              Отвязать
+            </button>
+          </div>
+
+          <button
+            v-if="attachedBugId"
+            class="tk-tap tk-plain bug-open"
+            :aria-pressed="reportOpen"
+            @click="reportOpen = !reportOpen"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">
+              <path d="M5 4h10l4 4v12H5z" />
+              <path d="M14 4v5h5M8 13h8M8 17h5" />
+            </svg>
+            {{ reportOpen ? 'Скрыть отчёт' : 'Открыть отчёт' }}
+          </button>
+
+          <template v-if="canManageBug">
+            <button class="tk-tap tk-plain bug-toggle" @click="openBugPicker">
+              {{
+                bugPickerOpen
+                  ? 'Скрыть перечень'
+                  : attachedBugId
+                    ? 'Выбрать другой баг'
+                    : 'Привязать баг'
+              }}
+            </button>
+
+            <div v-if="bugPickerOpen" class="bug-picker">
+              <p v-if="bugsLoading" class="bug-picker__note">Загружаем перечень…</p>
+              <div v-else-if="bugsUnavailable" class="bug-picker__warning">
+                <span>{{ bugsError }}</span>
+                <button class="tk-tap tk-plain bug-picker__retry" @click="openBugPicker">
+                  Повторить
+                </button>
+              </div>
+              <p v-else-if="bugsError" class="bug-picker__note bug-picker__note--error">
+                {{ bugsError }}
+              </p>
+              <p v-else-if="!bugOptions.length" class="bug-picker__note">
+                Открытых багов нет.
+              </p>
+
+              <ul v-else class="bug-picker__list">
+                <li v-for="bug in bugOptions" :key="bug.id">
+                  <button class="tk-tap tk-plain bug-option" @click="pickBug(bug.id)">
+                    <span class="bug-option__head">
+                      <span class="bug-option__code">#{{ bug.id }}</span>
+                      <span>{{ BUG_TAG_TITLES[bug.tag] ?? bug.tag }}</span>
+                    </span>
+                    <span class="bug-option__title">{{ bug.title }}</span>
+                  </button>
+                </li>
+              </ul>
+            </div>
+          </template>
+        </section>
+
+        <section>
           <h3 class="dialog__label">ПРИОРИТЕТ</h3>
           <div class="priority-row">
             <button
@@ -536,12 +813,35 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
           Удалить задачу
         </button>
         </aside>
+        </div>
       </div>
+
+      <!--
+        Отчёт о баге — второе окно рядом с задачей, а не часть её карточки.
+        Так у него своя прокрутка: длинный журнал больше не растягивает
+        задачу, а сам баг читается как отдельный документ.
+      -->
+      <BugReportPanel
+        v-if="selected.type === 'bug' && attachedBugId && reportOpen"
+        :bug="bugDetail"
+        :loading="bugDetailLoading"
+        :error="bugDetailError"
+        :unavailable="bugDetailUnavailable"
+        :can-detach="canManageBug"
+        @close="reportOpen = false"
+        @detach="dropBug"
+        @retry="retryBugDetail"
+      />
     </div>
   </div>
 </template>
 
 <style scoped>
+/*
+  Два окна в ряд: задача и отчёт о баге. Выравнивание по центру
+  оставляет их одной высоты по месту, но каждое тянется только до своего
+  содержимого — растягивать задачу под длинный журнал больше не нужно.
+*/
 .overlay {
   position: absolute;
   inset: 0;
@@ -549,10 +849,57 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
   background: rgba(4, 5, 8, 0.72);
   backdrop-filter: blur(3px);
   display: flex;
-  align-items: center;
+  /*
+    Ряд из двух окон прижат к верху, а внутри ряда окна тянутся до общей
+    высоты (align-items по умолчанию stretch). Высоту ряда задаёт задача:
+    отчёт короче, и по собственному содержимому он вытягивался бы в узкий
+    столбик рядом с высокой карточкой. Уравненный по высоте, он читается
+    как вторая половина одного экрана.
+  */
+  align-items: flex-start;
   justify-content: center;
   padding: 32px 24px;
   animation: tkFade 0.16s ease both;
+}
+
+/*
+  Пока окон два, задача сужается: вместе они должны помещаться в экран.
+  Порог тот же, на котором отчёт уезжает под задачу.
+*/
+@media (max-width: 1180px) {
+  .stage {
+    flex-direction: column;
+    gap: 12px;
+  }
+}
+
+/*
+  На телефоне ряд превращается в один экран: окно задачи занимает его
+  целиком, а отчёт ложится поверх (position: fixed внутри панели).
+  Поэтому ни колонки, ни зазора здесь уже не нужно.
+*/
+@media (max-width: 720px) {
+  .stage {
+    display: block;
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    gap: 0;
+  }
+}
+
+/*
+  Ряд из двух окон. Высоту задаёт задача (самое высокое окно), отчёт
+  тянется до неё за счёт stretch по умолчанию.
+*/
+.stage {
+  display: flex;
+  align-items: stretch;
+  gap: 16px;
+  /* Ряд не выше экрана: внутри окна прокручиваются сами. */
+  max-height: 100%;
+  min-height: 0;
+  min-width: 0;
 }
 
 .dialog {
@@ -561,6 +908,10 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
   width: 100%;
   max-width: 920px;
   max-height: 100%;
+  /* Рядом может стоять окно отчёта: задача должна уметь сжаться, иначе
+     вдвоём они не помещаются и отчёт уезжает за край экрана. */
+  min-width: 0;
+  flex-shrink: 1;
   background: var(--bg-modal);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 16px;
@@ -605,6 +956,170 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
   min-height: 0;
   overflow: auto;
   padding: 0 20px 24px;
+}
+
+.bug-linked {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: var(--danger-bg);
+  font-size: 12px;
+}
+
+.bug-linked__code {
+  font-weight: 700;
+  color: var(--danger-ink);
+}
+
+.bug-linked__note {
+  color: var(--ink-70);
+}
+
+.bug-linked__drop {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: var(--ink-40);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.bug-linked__drop:hover {
+  color: var(--danger-ink);
+}
+
+/* Кнопка, открывающая окно отчёта. Иконка документа намекает, что за
+   ней не переключатель, а текст, который нужно прочитать. */
+.bug-open {
+  margin-top: 6px;
+  width: 100%;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: var(--fill-hover);
+  color: var(--ink-70);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.bug-open svg {
+  width: 14px;
+  height: 14px;
+}
+
+.bug-open:hover {
+  border-color: var(--danger);
+  color: var(--ink);
+}
+
+.bug-toggle {
+  margin-top: 6px;
+  width: 100%;
+  height: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: var(--fill-hover);
+  color: var(--ink-70);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.bug-toggle:hover {
+  color: var(--ink);
+}
+
+.bug-picker {
+  margin-top: 6px;
+}
+
+.bug-picker__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-height: 190px;
+  overflow-y: auto;
+}
+
+.bug-option {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 9px;
+  text-align: left;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: var(--fill-hover);
+  color: inherit;
+  cursor: pointer;
+}
+
+.bug-option:hover {
+  border-color: var(--danger);
+}
+
+.bug-option__head {
+  display: flex;
+  gap: 8px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-40);
+}
+
+.bug-option__code {
+  font-weight: 700;
+  color: var(--danger-ink);
+}
+
+.bug-option__title {
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.bug-picker__note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-40);
+}
+
+.bug-picker__note--error {
+  color: var(--danger-ink);
+}
+
+/* Недоступность сервиса — предупреждение: задача и её привязка целы,
+   недоступен только перечень. */
+.bug-picker__warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border-radius: 9px;
+  background: var(--warning-bg);
+  color: var(--warning-ink);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.bug-picker__retry {
+  margin-left: auto;
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 .dialog__side {
@@ -687,6 +1202,37 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
      «что сейчас с задачей», а мета и настройки — уже подробности. */
   .dialog__checklist {
     order: -1;
+  }
+
+  /*
+    Колонка параметров в один столбец: секции внутри неё можно
+    переставлять. Нужно для бага — см. правило ниже.
+  */
+  .dialog__side {
+    display: flex;
+    flex-direction: column;
+  }
+
+  /*
+    Баг идёт сразу за чек-листом, но выше настроек. На узком экране
+    отчёт свёрнут, и кнопка «Открыть отчёт» — единственный вход в него;
+    оставленная среди приоритета и исполнителя, она нашлась бы только
+    прокруткой, хотя ради бага задачу и открывают.
+
+    Выше чек-листа со статусом не поднимаем: те отвечают на вопрос
+    «что сейчас с задачей», и он первее, чем «из-за чего она заведена».
+  */
+  .bug-section {
+    order: -1;
+  }
+
+  /*
+    Кнопка удаления остаётся последней. Она не section, и общее правило
+    порядка её не касается — без этого она всплывала бы сразу под баг,
+    то есть опасное действие оказывалось бы под пальцем одним из первых.
+  */
+  .danger-button {
+    order: 10;
   }
 }
 

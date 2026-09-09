@@ -1,8 +1,14 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 
 import { useTasksStore } from '../stores/tasks'
+import {
+  isSoundEnabled,
+  noticePermission,
+  requestNoticePermission,
+  setSoundEnabled,
+} from '../lib/notify'
 import { STATUS_TITLES, STATUS_TONES, pluralTasks } from '../lib/presentation'
 import type { TaskStatus } from '../types/task'
 
@@ -37,6 +43,30 @@ const statusOptions = computed(() => {
   }))
 })
 
+/**
+ * Звук уведомлений о новых задачах и комментариях.
+ *
+ * Настройка живёт в lib/notify (там же localStorage), здесь только её
+ * отражение: компонент не должен знать, как она хранится.
+ */
+const soundOn = ref(isSoundEnabled())
+
+/**
+ * Переключает звук и заодно просит разрешение на системные уведомления.
+ *
+ * Запрос идёт именно отсюда: браузер принимает его только из
+ * обработчика действия пользователя, а после отказа второй раз уже
+ * не спросит.
+ */
+async function toggleSound(): Promise<void> {
+  soundOn.value = !soundOn.value
+  setSoundEnabled(soundOn.value)
+
+  if (soundOn.value && noticePermission() === 'default') {
+    await requestNoticePermission()
+  }
+}
+
 /** Индикатор живого соединения — видно, приходят ли обновления. */
 const connectionTone = computed(() => {
   switch (connection.value) {
@@ -70,6 +100,23 @@ const connectionTone = computed(() => {
       :style="{ background: connectionTone.color }"
       :title="connectionTone.title"
     />
+
+    <button
+      class="tk-tap header__sound"
+      :class="{ 'header__sound--off': !soundOn }"
+      :aria-pressed="soundOn"
+      :title="soundOn ? 'Звук уведомлений включён' : 'Звук уведомлений выключен'"
+      @click="toggleSound"
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">
+        <path d="M4 9.5v5h3.2L12 18.5v-13L7.2 9.5H4z" />
+        <template v-if="soundOn">
+          <path d="M15.6 9.2a4 4 0 010 5.6" />
+          <path d="M18 6.8a7.4 7.4 0 010 10.4" />
+        </template>
+        <path v-else d="M16 10l4 4M20 10l-4 4" />
+      </svg>
+    </button>
 
     <div class="header__spacer" />
 
@@ -122,6 +169,33 @@ const connectionTone = computed(() => {
 .header__titles {
   flex: none;
   white-space: nowrap;
+}
+
+.header__sound {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-70);
+  cursor: pointer;
+}
+
+.header__sound svg {
+  width: 17px;
+  height: 17px;
+}
+
+.header__sound:hover {
+  background: var(--fill-hover);
+  color: var(--ink);
+}
+
+.header__sound--off {
+  color: var(--ink-30);
 }
 
 .header__title {
@@ -314,6 +388,13 @@ const connectionTone = computed(() => {
   .header__menu {
     width: 42px;
     height: 42px;
+  }
+
+  /* Переключатель звука — такая же цель под палец, как и меню:
+     30px мимо пальца, особенно рядом с заголовком. */
+  .header__sound {
+    width: 40px;
+    height: 40px;
   }
 
   .search {

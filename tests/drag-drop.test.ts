@@ -19,6 +19,7 @@ function makeTask(status: TaskStatus, assigneeId: number | null): Task {
     type: 'bug',
     status,
     priority: 20,
+    project: 'rtm-task',
     creatorId: 1,
     assigneeId,
     version: 1,

@@ -26,6 +26,7 @@ function task(overrides: Partial<Task> = {}): Task {
     type: 'bug',
     status: 'new',
     priority: 20,
+    project: 'rtm-task',
     creatorId: 1,
     assigneeId: 2,
     version: 1,

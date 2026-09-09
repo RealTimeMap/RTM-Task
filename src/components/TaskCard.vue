@@ -3,9 +3,16 @@ import { computed } from 'vue'
 
 import AvatarBadge from './ui/AvatarBadge.vue'
 import TagChip from './ui/TagChip.vue'
-import { TYPE_TONES, priorityTone, taskCode } from '../lib/presentation'
+import {
+  PROJECT_SHORT,
+  PROJECT_TONES,
+  TYPE_TONES,
+  priorityTone,
+  taskCode,
+} from '../lib/presentation'
 import { useSessionStore } from '../stores/session'
 import {
+  hasBug,
   hasChecklist,
   isInRework,
   nextStatus,
@@ -76,6 +83,15 @@ const commentCount = computed(() => props.task.commentCount ?? 0)
 
 /** Задача с незакрытым замечанием — её видно, не открывая. */
 const inRework = computed(() => isInRework(props.task))
+
+/** Значок проекта: на общей доске видно, к какому продукту задача. */
+const project = computed(() => ({
+  label: PROJECT_SHORT[props.task.project] ?? props.task.project,
+  tone: PROJECT_TONES[props.task.project],
+}))
+
+/** Привязанный баг — по нему видно, что задача ведёт конкретный отчёт. */
+const bugId = computed(() => (hasBug(props.task) ? props.task.bugId : null))
 </script>
 
 <template>
@@ -103,6 +119,14 @@ const inRework = computed(() => isInRework(props.task))
       <div class="card__meta">
         <TagChip :label="type.label" :ink="type.ink" :bg="type.bg" size="sm" />
         <span class="card__code">{{ taskCode(task.id) }}</span>
+        <span
+          v-if="project.tone"
+          class="card__project"
+          :style="{ color: project.tone.ink, background: project.tone.bg }"
+          :title="`Проект: ${task.project}`"
+        >
+          {{ project.label }}
+        </span>
         <span class="card__spacer" />
         <span
           class="card__priority"
@@ -112,9 +136,17 @@ const inRework = computed(() => isInRework(props.task))
       </div>
       <h3 class="card__title">{{ task.title }}</h3>
 
-      <div v-if="inRework || checklist || commentCount" class="marks">
+      <div v-if="inRework || bugId || checklist || commentCount" class="marks">
         <span v-if="inRework" class="mark mark--rework" title="Задача возвращена в доработку">
           ДОРАБОТКА
+        </span>
+
+        <span
+          v-if="bugId"
+          class="mark mark--bug"
+          :title="`Баг из feedback-service: #${bugId}`"
+        >
+          BUG #{{ bugId }}
         </span>
 
         <span
@@ -229,6 +261,15 @@ const inRework = computed(() => isInRework(props.task))
   white-space: nowrap;
 }
 
+.card__project {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 2px 5px;
+  border-radius: 5px;
+  white-space: nowrap;
+}
+
 .card__spacer {
   flex: 1;
 }
@@ -281,6 +322,13 @@ const inRework = computed(() => isInRework(props.task))
 .mark--complete {
   background: var(--success-bg);
   color: var(--success-ink);
+}
+
+.mark--bug {
+  color: var(--danger-ink);
+  background: var(--danger-bg);
+  font-weight: 700;
+  letter-spacing: 0.03em;
 }
 
 .mark--rework {

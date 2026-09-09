@@ -1,5 +1,9 @@
 import { request } from './client'
 import type {
+  Bug,
+  BugDetail,
+  BugListResponse,
+  BugTag,
   ChecklistItem,
   ChecklistResponse,
   Comment,
@@ -53,7 +57,40 @@ export const tasksApi = {
   remove(id: number): Promise<void> {
     return request<void>(`/tasks/${id}`, { method: 'DELETE' })
   },
+
+  /**
+   * Подробности бага, над которым идёт работа: обстановка
+   * воспроизведения и логи. Идентификатор бага сервер берёт из самой
+   * задачи, поэтому передавать его не нужно.
+   */
+  bug(id: number): Promise<BugDetail> {
+    return request<BugDetail>(`/tasks/${id}/bug`)
+  },
+
+  /** Привязывает баг к задаче. Ответ - обновлённая задача. */
+  attachBug(id: number, bugId: number): Promise<Task> {
+    return request<Task>(`/tasks/${id}/bug`, { method: 'PUT', body: { bugId } })
+  },
+
+  /** Снимает привязку и возвращает баг в перечень свободных. */
+  detachBug(id: number): Promise<Task> {
+    return request<Task>(`/tasks/${id}/bug`, { method: 'DELETE' })
+  },
 }
+
+/**
+ * Перечень багов feedback-service, доступных для привязки.
+ *
+ * Живёт вне /tasks/:id: список нужен ещё до того, как задача создана -
+ * в форме, где выбирают, над каким багом заводить работу.
+ */
+export const bugsApi = {
+  list(filters: { tag?: BugTag; limit?: number } = {}): Promise<BugListResponse> {
+    return request<BugListResponse>('/bugs', { query: { ...filters } })
+  },
+}
+
+export type { Bug, BugDetail }
 
 /**
  * Обсуждение и чек-лист живут вложенными в задачу: без неё они

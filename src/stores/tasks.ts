@@ -10,11 +10,13 @@ import {
   type ConnectionState,
 } from '../api/socket'
 import type {
+  Comment,
   CreateTaskPayload,
   SortField,
   SortOrder,
   Task,
   TaskFilters,
+  TaskProject,
   TaskSort,
   TaskStatus,
   TaskType,
@@ -22,6 +24,8 @@ import type {
   UpdateTaskPayload,
 } from '../types/task'
 import { DEFAULT_SORT, STATUS_ORDER, defaultSortOrder } from '../types/task'
+import { notify } from '../lib/notify'
+import { taskCode } from '../lib/presentation'
 // Порядок типов — часть представления: он же задаёт последовательность
 // в фильтрах и форме создания.
 import { TYPE_ORDER } from '../lib/presentation'
@@ -67,6 +71,36 @@ function compareTasks(a: Task, b: Task, sort: TaskSort): number {
 
 /** Ключ, под которым сохраняется выбранный порядок списка. */
 const SORT_STORAGE_KEY = 'rtm-task:sort'
+
+/** Сколько символов реплики показывать в системном уведомлении. */
+const COMMENT_PREVIEW_LENGTH = 120
+
+/** Ключ выбранного проекта: команда обычно работает в одном и том же. */
+const PROJECT_STORAGE_KEY = 'rtm-task:project'
+
+/**
+ * Читает сохранённый проект.
+ *
+ * Как и порядок сортировки, значение приходит из localStorage — то есть
+ * из внешнего мира, — поэтому проверяется, а не берётся на веру.
+ */
+function restoreProject(): TaskProject | 'all' {
+  try {
+    const raw = localStorage.getItem(PROJECT_STORAGE_KEY)
+    if (raw === 'rtm-task' || raw === 'rtm-app' || raw === 'all') return raw
+    return 'all'
+  } catch {
+    return 'all'
+  }
+}
+
+function persistProject(project: TaskProject | 'all'): void {
+  try {
+    localStorage.setItem(PROJECT_STORAGE_KEY, project)
+  } catch {
+    // Приватный режим — не повод падать.
+  }
+}
 
 /**
  * Читает сохранённый порядок.
@@ -119,6 +153,15 @@ export const useTasksStore = defineStore('tasks', () => {
   const query = ref('')
   const typeFilter = ref<TaskType | 'all'>('all')
   const statusFilter = ref<TaskStatus | 'all'>('all')
+
+  /**
+   * Проект, задачи которого показывает доска.
+   *
+   * Фильтруется на сервере, а не на клиенте: проект делит работу между
+   * командами, и подгружать чужие задачи ради того, чтобы тут же их
+   * скрыть, незачем.
+   */
+  const projectFilter = ref<TaskProject | 'all'>(restoreProject())
 
   /**
    * Порядок списка. Сортирует сервер: при пагинации сортировка на
@@ -271,6 +314,10 @@ export const useTasksStore = defineStore('tasks', () => {
    * В режиме «Мои» чужие задачи из realtime-потока игнорируются.
    */
   function inScope(task: Task): boolean {
+    // Задача из другого проекта на этой доске не показывается — даже
+    // если она наша: фильтр по проекту применяется и к потоку событий,
+    // иначе realtime приносил бы то, что не вернула бы загрузка.
+    if (projectFilter.value !== 'all' && task.project !== projectFilter.value) return false
     if (scope.value === 'all') return true
     return task.assigneeId === viewerId || task.creatorId === viewerId
   }
@@ -283,6 +330,9 @@ export const useTasksStore = defineStore('tasks', () => {
     }
     if (scope.value === 'mine' && viewerId !== null) {
       filters.assigneeId = viewerId
+    }
+    if (projectFilter.value !== 'all') {
+      filters.project = projectFilter.value
     }
     return filters
   }
@@ -305,6 +355,14 @@ export const useTasksStore = defineStore('tasks', () => {
   async function setScope(next: ScopeMode): Promise<void> {
     if (scope.value === next) return
     scope.value = next
+    await load()
+  }
+
+  /** Переключает проект и перезагружает список: фильтрует сервер. */
+  async function setProject(next: TaskProject | 'all'): Promise<void> {
+    if (projectFilter.value === next) return
+    projectFilter.value = next
+    persistProject(next)
     await load()
   }
 
@@ -376,7 +434,13 @@ export const useTasksStore = defineStore('tasks', () => {
     ]) {
       socket.on(event, (task: Task) => {
         if (inScope(task)) {
+          const known = items.value.some((item) => item.id === task.id)
           upsert(task)
+          // Уведомляем только о задачах, которых мы ещё не видели:
+          // событие обновления по той же задаче приходит на каждое
+          // изменение, и сигналить на каждое значило бы звенеть без
+          // остановки.
+          if (!known) announceTask(task)
         } else {
           // Задачу переназначили на другого — из «Моих» она уходит.
           remove(task.id)
@@ -385,12 +449,59 @@ export const useTasksStore = defineStore('tasks', () => {
     }
 
     socket.on(TaskEvents.Deleted, (task: Task) => remove(task.id))
+
+    // Комментарии озвучиваются здесь, а не в сторе обсуждения: тот
+    // держит только открытую задачу и о репликах в остальных не знает,
+    // а услышать о новом комментарии нужно и с закрытой карточкой.
+    socket.on(TaskEvents.CommentAdded, (comment: Comment) => {
+      announceComment(comment)
+    })
   }
 
   function disconnect(): void {
     disconnectSocket()
     connection.value = 'idle'
     viewerId = null
+  }
+
+  /**
+   * Сообщает о появившейся задаче звуком и системным уведомлением.
+   *
+   * Своё же действие не озвучивается: тот, кто только что создал задачу,
+   * и так знает о ней — сигнал был бы эхом собственного клика.
+   */
+  function announceTask(task: Task): void {
+    if (task.creatorId === viewerId) return
+
+    const assigned = task.assigneeId === viewerId
+    notify(
+      'task',
+      assigned ? 'Новая задача на вас' : 'Новая задача',
+      `${taskCode(task.id)} · ${task.title}`,
+      `task-${task.id}`,
+    )
+  }
+
+  /**
+   * Сообщает о новом комментарии.
+   *
+   * Молчим о своих же репликах и о чужих задачах: звенеть на каждое
+   * обсуждение в системе — верный способ добиться того, чтобы звук
+   * выключили совсем. Уведомляем только там, где мы участники.
+   */
+  function announceComment(comment: Comment): void {
+    if (comment.authorId === viewerId) return
+
+    const task = items.value.find((item) => item.id === comment.taskId)
+    if (!task) return
+    if (task.assigneeId !== viewerId && task.creatorId !== viewerId) return
+
+    notify(
+      'comment',
+      `Комментарий в ${taskCode(task.id)}`,
+      comment.body.slice(0, COMMENT_PREVIEW_LENGTH),
+      `comment-${comment.taskId}`,
+    )
   }
 
   /**
@@ -469,6 +580,16 @@ export const useTasksStore = defineStore('tasks', () => {
     return mutate(() => tasksApi.unassign(id))
   }
 
+  /** Привязывает баг из feedback-service к задаче. */
+  async function attachBug(id: number, bugId: number): Promise<Task | null> {
+    return mutate(() => tasksApi.attachBug(id, bugId))
+  }
+
+  /** Снимает привязку и возвращает баг в перечень свободных. */
+  async function detachBug(id: number): Promise<Task | null> {
+    return mutate(() => tasksApi.detachBug(id))
+  }
+
   /** Сдвигает задачу по цепочке статусов на шаг вперёд или назад. */
   async function moveByStep(id: number, direction: 1 | -1): Promise<Task | null> {
     const task = items.value.find((item) => item.id === id)
@@ -523,6 +644,7 @@ export const useTasksStore = defineStore('tasks', () => {
     query,
     typeFilter,
     statusFilter,
+    projectFilter,
     selectedId,
     selected,
     connection,
@@ -536,6 +658,7 @@ export const useTasksStore = defineStore('tasks', () => {
     completedCount,
     load,
     setScope,
+    setProject,
     setSort,
     connect,
     disconnect,
@@ -547,6 +670,8 @@ export const useTasksStore = defineStore('tasks', () => {
     setPriority,
     assign,
     unassign,
+    attachBug,
+    detachBug,
     moveByStep,
     removeTask: remove_,
     applySummary,

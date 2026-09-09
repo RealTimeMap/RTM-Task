@@ -3,7 +3,14 @@
  * Палитра — из макета «RealTimeMap Tasks».
  */
 
-import { Priority, type TaskPriority, type TaskStatus, type TaskType } from '../types/task'
+import {
+  Priority,
+  type BugTag,
+  type TaskPriority,
+  type TaskProject,
+  type TaskStatus,
+  type TaskType,
+} from '../types/task'
 
 interface Tone {
   label: string
@@ -70,6 +77,41 @@ export const STATUS_TONES: Record<TaskStatus, Tone> = {
     bg: 'var(--success-bg)',
     dot: 'var(--success)',
   },
+}
+
+/**
+ * Подписи проектов. Порядок и состав закрыты доменом: проектов ровно
+ * два, и новый добавляется здесь же, где и в types/task.ts.
+ */
+export const PROJECT_TITLES: Record<TaskProject, string> = {
+  'rtm-task': 'RTM-Task',
+  'rtm-app': 'RTM-App',
+}
+
+/** Короткие подписи проектов — для значка на карточке. */
+export const PROJECT_SHORT: Record<TaskProject, string> = {
+  'rtm-task': 'TASK',
+  'rtm-app': 'APP',
+}
+
+export const PROJECT_TONES: Record<TaskProject, { ink: string; bg: string; dot: string }> = {
+  'rtm-task': {
+    ink: 'var(--cyan-ink)',
+    bg: 'var(--cyan-bg)',
+    dot: 'var(--cyan)',
+  },
+  'rtm-app': {
+    ink: 'var(--violet-ink)',
+    bg: 'var(--violet-bg)',
+    dot: 'var(--violet)',
+  },
+}
+
+/** Подписи категорий бага. Значения принадлежат feedback-service. */
+export const BUG_TAG_TITLES: Record<BugTag, string> = {
+  feature: 'Функциональность',
+  ui: 'Интерфейс',
+  logic: 'Логика',
 }
 
 /** Подписи статусов в предложном виде — для кнопок и колонок. */
@@ -167,4 +209,20 @@ export function pluralTasks(count: number): string {
   if (mod10 === 1 && mod100 !== 11) return 'задача'
   if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return 'задачи'
   return 'задач'
+}
+
+/**
+ * Порог, ниже которого интерфейс считается телефонным.
+ *
+ * То же значение, что у медиазапросов в компонентах: там окна
+ * разворачиваются во весь экран. Держится здесь, чтобы поведение и
+ * вёрстка переключались на одной и той же ширине, а не разъезжались
+ * при правке одного из двух мест.
+ */
+export const MOBILE_BREAKPOINT = 720
+
+/** Экран узкий — окна открываются на весь экран, а не рядом. */
+export function isNarrowScreen(): boolean {
+  if (typeof window === 'undefined') return false
+  return window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT}px)`).matches
 }

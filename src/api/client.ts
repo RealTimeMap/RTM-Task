@@ -53,6 +53,22 @@ export class ApiError extends Error {
   get isNotFound(): boolean {
     return this.status === 404
   }
+
+  /**
+   * Сервис, от которого зависит операция, сейчас недоступен.
+   *
+   * Отличается от обычной ошибки сервера тем, что виноваты не мы и не
+   * запрос: отказ временный, и повтор имеет смысл. Бэкенд отдаёт 503 с
+   * кодом service_unavailable и именем сервиса в поле field.
+   */
+  get isUnavailable(): boolean {
+    return this.status === 503
+  }
+
+  /** Имя недоступного сервиса, если бэкенд его сообщил. */
+  get unavailableService(): string | undefined {
+    return this.isUnavailable ? this.field : undefined
+  }
 }
 
 interface RequestOptions {
@@ -120,7 +136,29 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
 
 /** Приводит любую пойманную ошибку к читаемому тексту. */
 export function errorMessage(error: unknown): string {
-  if (error instanceof ApiError) return error.message
+  if (error instanceof ApiError) {
+    // Сообщения о недоступности бэкенд пишет по-английски и для логов.
+    // Пользователю нужен не текст ошибки, а понимание, что делать:
+    // подождать и повторить.
+    if (error.isUnavailable) return unavailableMessage(error.unavailableService)
+    return error.message
+  }
   if (error instanceof Error) return error.message
   return 'Неизвестная ошибка'
+}
+
+/** Человеческие названия сервисов, от которых зависят операции. */
+const SERVICE_TITLES: Record<string, string> = {
+  feedback: 'Сервис багов',
+}
+
+/**
+ * Текст о временной недоступности зависимости.
+ *
+ * Отдельно от остальных ошибок: тут важно сказать, что дело не в
+ * действиях пользователя и что попытку имеет смысл повторить.
+ */
+export function unavailableMessage(service?: string): string {
+  const title = (service && SERVICE_TITLES[service]) ?? 'Внешний сервис'
+  return `${title} временно недоступен. Попробуйте позже.`
 }

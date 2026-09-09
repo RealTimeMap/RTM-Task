@@ -30,6 +30,7 @@ function task(overrides: Partial<Task> = {}): Task {
     type: 'feature',
     status: 'working',
     priority: 20,
+    project: 'rtm-task',
     creatorId: 1,
     assigneeId: 2,
     version: 3,

@@ -6,6 +6,17 @@
 export type TaskStatus = 'new' | 'working' | 'review' | 'complete'
 export type TaskType = 'bug' | 'feature' | 'fix' | 'refactor' | 'update'
 
+/**
+ * Проект, в который направлена задача. Значения совпадают с доменом
+ * (internal/domain/task/model.go - Project).
+ */
+export type TaskProject = 'rtm-task' | 'rtm-app'
+
+export const PROJECT_ORDER: TaskProject[] = ['rtm-task', 'rtm-app']
+
+/** Проект по умолчанию - тот же, что проставляет сервер. */
+export const DEFAULT_PROJECT: TaskProject = 'rtm-task'
+
 /** Приоритет: числовые значения заданы бэкендом, меньше — важнее. */
 export const Priority = {
   Base: 10,
@@ -23,9 +34,16 @@ export interface Task {
   type: TaskType
   status: TaskStatus
   priority: TaskPriority
+  project: TaskProject
   creatorId: number
   assigneeId: number | null
   version: number
+
+  /**
+   * Баг из feedback-service, над которым идёт работа.
+   * Приходит только у задач типа bug.
+   */
+  bugId?: number | null
   closedAt?: string | null
   createdAt: string
   updatedAt: string
@@ -123,6 +141,7 @@ export interface TaskFilters {
   status?: TaskStatus
   type?: TaskType
   priority?: TaskPriority
+  project?: TaskProject
   creatorId?: number
   assigneeId?: number
   unassigned?: boolean
@@ -137,9 +156,58 @@ export interface CreateTaskPayload {
   description?: string
   type: TaskType
   priority?: TaskPriority
+  project?: TaskProject
   assigneeId?: number | null
   /** Заготовка чек-листа, заполняемая прямо в форме создания. */
   checklist?: string[]
+
+  /**
+   * Баг, который берут в работу этой задачей.
+   * Сервер принимает его только вместе с type: 'bug'.
+   */
+  bugId?: number | null
+}
+
+/**
+ * Баг из feedback-service, доступный для привязки.
+ *
+ * Завершённые и уже занятые другой задачей баги сюда не попадают:
+ * их отбирает feedback-service.
+ */
+export interface Bug {
+  id: number
+  title: string
+  description?: string
+  tag: BugTag
+  status: string
+  platform?: string
+  build?: string
+  hasLogs: boolean
+  createdAt: string
+}
+
+/**
+ * Баг целиком: обстановка воспроизведения и логи.
+ *
+ * Отдельно от карточки перечня - эти поля приходят только при чтении
+ * конкретного бага, потому что логи весят прилично.
+ */
+export interface BugDetail extends Bug {
+  os?: string
+  resolution?: string
+  width?: number
+  height?: number
+  battery?: number | null
+  reporterId?: number | null
+  logs: string[]
+}
+
+/** Категория бага. Значения принадлежат feedback-service. */
+export type BugTag = 'feature' | 'ui' | 'logic'
+
+export interface BugListResponse {
+  items: Bug[]
+  total: number
 }
 
 export interface UpdateTaskPayload {
@@ -147,6 +215,7 @@ export interface UpdateTaskPayload {
   description?: string
   type?: TaskType
   priority?: TaskPriority
+  project?: TaskProject
 }
 
 /**
@@ -213,4 +282,18 @@ export function previousStatus(status: TaskStatus): TaskStatus | null {
   const index = STATUS_ORDER.indexOf(status)
   const target = STATUS_ORDER[index - 1]
   return target && canTransition(status, target) ? target : null
+}
+
+/** К задаче привязан баг из feedback-service. */
+export function hasBug(task: Task): boolean {
+  return typeof task.bugId === 'number'
+}
+
+/**
+ * Баг можно привязать только к задаче типа bug: сервер отклонит
+ * привязку к любой другой, а обратная синхронизация закрывала бы баг
+ * по завершении посторонней работы.
+ */
+export function canAttachBug(task: Task): boolean {
+  return task.type === 'bug' && task.status !== 'complete'
 }

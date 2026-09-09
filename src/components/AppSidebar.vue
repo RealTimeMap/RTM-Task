@@ -5,9 +5,15 @@ import { storeToRefs } from 'pinia'
 import AvatarBadge from './ui/AvatarBadge.vue'
 import { useSessionStore } from '../stores/session'
 import { useTasksStore, type ScopeMode, type ViewMode } from '../stores/tasks'
-import { TYPE_ORDER, TYPE_TITLES, TYPE_TONES } from '../lib/presentation'
+import {
+  PROJECT_TITLES,
+  PROJECT_TONES,
+  TYPE_ORDER,
+  TYPE_TITLES,
+  TYPE_TONES,
+} from '../lib/presentation'
 import { ROLE_LABELS } from '../types/staff'
-import type { TaskType } from '../types/task'
+import { PROJECT_ORDER, type TaskProject, type TaskType } from '../types/task'
 
 withDefaults(defineProps<{ open?: boolean }>(), { open: false })
 
@@ -16,7 +22,7 @@ const emit = defineEmits<{ create: []; close: [] }>()
 const session = useSessionStore()
 const tasks = useTasksStore()
 const { staff, permissions } = storeToRefs(session)
-const { scope, view, typeFilter, typeCounts } = storeToRefs(tasks)
+const { scope, view, typeFilter, typeCounts, projectFilter } = storeToRefs(tasks)
 
 interface ViewOption {
   key: string
@@ -53,6 +59,26 @@ const typeOptions = computed(() => {
     dot: key === 'all' ? 'rgba(255,255,255,.2)' : TYPE_TONES[key].dot,
   }))
 })
+
+/**
+ * Проекты для фильтра. Счётчики здесь не показываются: фильтрует сервер,
+ * и в списке лежат задачи только выбранного проекта - счётчик остальных
+ * всегда был бы нулём.
+ */
+const projectOptions = computed(() => {
+  const projects: (TaskProject | 'all')[] = ['all', ...PROJECT_ORDER]
+
+  return projects.map((key) => ({
+    key,
+    label: key === 'all' ? 'Все проекты' : PROJECT_TITLES[key],
+    dot: key === 'all' ? 'rgba(255,255,255,.2)' : PROJECT_TONES[key].dot,
+  }))
+})
+
+async function pickProject(key: TaskProject | 'all'): Promise<void> {
+  await tasks.setProject(key)
+  emit('close')
+}
 
 const roleLabel = computed(() => (staff.value ? ROLE_LABELS[staff.value.role] : ''))
 </script>
@@ -92,6 +118,23 @@ const roleLabel = computed(() => (staff.value ? ROLE_LABELS[staff.value.role] : 
           >
             <span class="nav-item__dot" />
             <span class="nav-item__label">{{ option.label }}</span>
+          </button>
+        </div>
+      </nav>
+
+      <nav aria-label="Фильтр по проекту">
+        <div class="group-title">ПРОЕКТ</div>
+        <div class="group">
+          <button
+            v-for="option in projectOptions"
+            :key="option.key"
+            class="tk-tap tk-plain type-item"
+            :class="{ 'type-item--active': projectFilter === option.key }"
+            :aria-pressed="projectFilter === option.key"
+            @click="pickProject(option.key)"
+          >
+            <span class="type-item__dot" :style="{ background: option.dot }" />
+            <span class="type-item__label">{{ option.label }}</span>
           </button>
         </div>
       </nav>
