@@ -15,7 +15,7 @@ export type TaskProject = 'rtm-task' | 'rtm-app'
 export const PROJECT_ORDER: TaskProject[] = ['rtm-task', 'rtm-app']
 
 /** Проект по умолчанию - тот же, что проставляет сервер. */
-export const DEFAULT_PROJECT: TaskProject = 'rtm-task'
+export const DEFAULT_PROJECT: TaskProject = 'rtm-app'
 
 /** Приоритет: числовые значения заданы бэкендом, меньше — важнее. */
 export const Priority = {
