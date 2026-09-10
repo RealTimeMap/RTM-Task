@@ -32,7 +32,7 @@ function task(overrides: Partial<Task> = {}): Task {
     type: 'bug',
     status: 'new',
     priority: 20,
-    project: 'rtm-task',
+    project: 'rtm-app',
     creatorId: 1,
     assigneeId: 2,
     version: 1,
@@ -67,7 +67,7 @@ check('в задаче на проверке привязка доступна',
 // --- Проекты ---------------------------------------------------------
 
 check('проектов ровно два', PROJECT_ORDER.length, 2)
-check('проект по умолчанию — rtm-task', DEFAULT_PROJECT, 'rtm-task')
+check('проект по умолчанию — rtm-app', DEFAULT_PROJECT, 'rtm-app')
 check('проект по умолчанию входит в перечень', PROJECT_ORDER.includes(DEFAULT_PROJECT), true)
 
 // Каждому проекту нужны подписи и цвет: без них фильтр и значок на
