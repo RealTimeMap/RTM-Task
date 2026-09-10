@@ -40,20 +40,40 @@ server {
 
     # SPA: любой неизвестный путь отдаёт index.html, маршрутизация
     # разбирается на клиенте.
+    #
+    # Файлы без хэша в имени (favicon.svg, icons.svg и прочее из public/)
+    # обновляются на месте, поэтому надолго их кэшировать нельзя: имя
+    # прежнее, а содержимое новое, и браузер не узнает о подмене.
+    # Короткое время с обязательной перепроверкой — компромисс между
+    # лишними запросами и застрявшей иконкой.
     location / {
+        add_header Cache-Control "public, max-age=300, must-revalidate" always;
         try_files $uri $uri/ /index.html;
     }
 
     # Бандлы содержат хэш в имени, поэтому кэшируются надолго.
     location /assets/ {
-        add_header Cache-Control "public, max-age=31536000, immutable";
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
         try_files $uri =404;
     }
 
     # index.html не кэшируется: иначе после деплоя браузер продолжит
     # грузить старые бандлы, которых уже нет.
+    #
+    # always обязателен: без него add_header молчит на ответах с кодом
+    # вроде 304, и браузер, переспросивший по ETag, остаётся без
+    # запрета кэширования.
     location = /index.html {
-        add_header Cache-Control "no-store, must-revalidate";
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+        add_header Pragma "no-cache" always;
+        add_header Expires "0" always;
+    }
+
+    # API и сокет сюда не доходят (их забирает traefik), но если схема
+    # раздачи изменится — запрет кэша должен уехать вместе с ней.
+    location /api/ {
+        add_header Cache-Control "no-store, no-cache, must-revalidate, private" always;
+        return 404;
     }
 
     gzip on;
