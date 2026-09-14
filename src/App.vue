@@ -4,6 +4,8 @@ import { storeToRefs } from 'pinia'
 
 import AppHeader from './components/AppHeader.vue'
 import AppSidebar from './components/AppSidebar.vue'
+import BugsPage from './components/BugsPage.vue'
+import IdeasPage from './components/IdeasPage.vue'
 import CreateTaskModal from './components/CreateTaskModal.vue'
 import LoginScreen from './components/LoginScreen.vue'
 import TaskBoard from './components/TaskBoard.vue'
@@ -86,15 +88,22 @@ const menuOpen = ref(false)
       <main class="main">
         <AppHeader @menu="menuOpen = true" />
 
-        <div class="tk-scroll content">
+        <div
+          class="tk-scroll content"
+          :class="{ 'content--fill': view === 'bugs' || view === 'ideas' }"
+        >
           <p v-if="error" class="banner" @click="tasks.clearError()">
             {{ error }}
           </p>
 
-          <p v-if="loading" class="hint">Загружаем задачи…</p>
+          <p v-if="loading && view !== 'bugs' && view !== 'ideas'" class="hint">
+            Загружаем задачи…
+          </p>
 
-          <template v-else>
-            <TaskBoard v-if="view === 'board'" @create="openCreate" />
+          <template v-if="view === 'bugs' || view === 'ideas' || !loading">
+            <BugsPage v-if="view === 'bugs'" />
+            <IdeasPage v-else-if="view === 'ideas'" />
+            <TaskBoard v-else-if="view === 'board'" @create="openCreate" />
             <TaskList v-else />
           </template>
         </div>
@@ -136,6 +145,19 @@ const menuOpen = ref(false)
   flex: 1;
   overflow: auto;
   padding: 20px 28px 28px;
+}
+
+/* Страница багов прокручивает список и карточку по отдельности, а не
+   целиком: иначе её внутренние области не знали бы своей высоты и
+   вытянулись бы по содержимому. */
+.content--fill {
+  overflow: hidden;
+  min-height: 0;
+  /* Колонка, а не блок: иначе баннер ошибки и страница делили бы
+     высоту как придётся, и вложенным прокруткам не от чего было бы
+     отсчитываться. */
+  display: flex;
+  flex-direction: column;
 }
 
 .banner {

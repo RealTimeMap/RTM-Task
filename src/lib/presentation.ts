@@ -114,6 +114,25 @@ export const BUG_TAG_TITLES: Record<BugTag, string> = {
   logic: 'Логика',
 }
 
+/**
+ * Подписи состояний бага. Значения задаёт feedback-service и переводит
+ * домен (internal/domain/task/bug.go — BugSync).
+ *
+ * Незнакомое значение показывается как есть: выдумывать за чужой сервис
+ * нельзя, а скрывать состояние — тем более. Перечень свободных багов
+ * почти всегда состоит из new, но состояние в нём приходит всегда.
+ */
+export const BUG_STATUS_TITLES: Record<string, string> = {
+  new: 'Новый',
+  'in work': 'В работе',
+  closed: 'Закрыт',
+}
+
+/** Подпись состояния бага, с запасом на незнакомое значение. */
+export function bugStatusTitle(status: string): string {
+  return BUG_STATUS_TITLES[status] ?? status
+}
+
 /** Подписи статусов в предложном виде — для кнопок и колонок. */
 export const STATUS_TITLES: Record<TaskStatus, string> = {
   new: 'Новые',
@@ -209,6 +228,26 @@ export function pluralTasks(count: number): string {
   if (mod10 === 1 && mod100 !== 11) return 'задача'
   if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return 'задачи'
   return 'задач'
+}
+
+/** Склонение слова «баг» по числу. */
+export function pluralBugs(count: number): string {
+  const mod10 = count % 10
+  const mod100 = count % 100
+
+  if (mod10 === 1 && mod100 !== 11) return 'баг'
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return 'бага'
+  return 'багов'
+}
+
+/** Склонение слова «идея» по числу. */
+export function pluralIdeas(count: number): string {
+  const mod10 = count % 10
+  const mod100 = count % 100
+
+  if (mod10 === 1 && mod100 !== 11) return 'идея'
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return 'идеи'
+  return 'идей'
 }
 
 /**

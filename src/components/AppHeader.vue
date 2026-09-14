@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 
+import { useBugsStore } from '../stores/bugs'
+import { useIdeasStore } from '../stores/ideas'
 import { useTasksStore } from '../stores/tasks'
 import {
   isSoundEnabled,
@@ -9,21 +11,95 @@ import {
   requestNoticePermission,
   setSoundEnabled,
 } from '../lib/notify'
-import { STATUS_TITLES, STATUS_TONES, pluralTasks } from '../lib/presentation'
+import {
+  STATUS_TITLES,
+  STATUS_TONES,
+  pluralBugs,
+  pluralIdeas,
+  pluralTasks,
+} from '../lib/presentation'
 import type { TaskStatus } from '../types/task'
 
 const emit = defineEmits<{ menu: [] }>()
 
+/**
+ * Высота шапки, вынесенная в CSS-переменную.
+ *
+ * Нужна полноэкранным панелям на телефоне: они раскрываются под
+ * шапкой, и без её высоты пришлось бы вписывать число руками. Шапка
+ * на узком экране переносит содержимое на несколько рядов, её высота
+ * зависит от страницы — записанная константа разъехалась бы с
+ * действительностью при первой же правке.
+ */
+const root = ref<HTMLElement | null>(null)
+let observer: ResizeObserver | null = null
+
+onMounted(() => {
+  const element = root.value
+  if (!element) return
+
+  const publish = () => {
+    document.documentElement.style.setProperty(
+      '--app-header-height',
+      `${Math.round(element.getBoundingClientRect().height)}px`,
+    )
+  }
+
+  publish()
+
+  // ResizeObserver есть не везде: без него остаётся значение с монтажа,
+  // и панель просто не подстроится под смену высоты — это хуже, чем
+  // точный отступ, но лучше, чем падение.
+  if (typeof ResizeObserver !== 'undefined') {
+    observer = new ResizeObserver(publish)
+    observer.observe(element)
+  }
+})
+
+onBeforeUnmount(() => {
+  observer?.disconnect()
+  observer = null
+})
+
 const tasks = useTasksStore()
+const bugs = useBugsStore()
+const ideas = useIdeasStore()
 const { scope, view, query, statusFilter, visible, total, completedCount, connection } =
   storeToRefs(tasks)
+const { visible: visibleBugs, total: totalBugs } = storeToRefs(bugs)
+const { visible: visibleIdeas, openCount: openIdeas } = storeToRefs(ideas)
+
+/**
+ * Страница багов показывает не задачи: поиск и фильтр по статусу там
+ * не о чем — у бага нет ни статуса задачи, ни её кода, — а свой поиск
+ * и свои категории у неё есть, прямо на странице.
+ */
+const onBugs = computed(() => view.value === 'bugs')
+const onIdeas = computed(() => view.value === 'ideas')
+
+/** Страница распоряжается поиском сама — шапка свой не показывает. */
+const ownSearch = computed(() => onBugs.value || onIdeas.value)
 
 const title = computed(() => {
+  if (onBugs.value) return 'Баги'
+  if (onIdeas.value) return 'Идеи'
   if (view.value === 'list') return 'Список задач'
   return scope.value === 'mine' ? 'Мои задачи' : 'Все задачи'
 })
 
 const subtitle = computed(() => {
+  if (onIdeas.value) {
+    const count = visibleIdeas.value.length
+    return `${count} ${pluralIdeas(count)} · ${openIdeas.value} не сделано`
+  }
+
+  if (onBugs.value) {
+    const count = visibleBugs.value.length
+    return count === totalBugs.value
+      ? `${count} ${pluralBugs(count)} в разборе`
+      : `${count} из ${totalBugs.value}`
+  }
+
   const count = visible.value.length
   const base = `${count} ${pluralTasks(count)}`
 
@@ -83,7 +159,7 @@ const connectionTone = computed(() => {
 </script>
 
 <template>
-  <header class="header">
+  <header ref="root" class="header">
     <button class="tk-tap header__menu" title="Меню" @click="emit('menu')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M4 7h16M4 12h16M4 17h16" />
@@ -120,7 +196,7 @@ const connectionTone = computed(() => {
 
     <div class="header__spacer" />
 
-    <label class="search">
+    <label v-if="!ownSearch" class="search">
       <svg viewBox="0 0 24 24" fill="none" stroke="rgba(233,233,237,.5)" stroke-width="1.8">
         <circle cx="11" cy="11" r="6.4" />
         <path d="M15.8 15.8L20 20" />
@@ -133,7 +209,12 @@ const connectionTone = computed(() => {
       />
     </label>
 
-    <div class="tk-scroll filters" role="group" aria-label="Фильтр по статусу">
+    <div
+      v-if="!ownSearch"
+      class="tk-scroll filters"
+      role="group"
+      aria-label="Фильтр по статусу"
+    >
       <button
         v-for="option in statusOptions"
         :key="option.key"

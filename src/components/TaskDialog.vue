@@ -9,6 +9,7 @@ import TagChip from './ui/TagChip.vue'
 import TaskChecklist from './TaskChecklist.vue'
 import TaskComments from './TaskComments.vue'
 import BugReportPanel from './BugReportPanel.vue'
+import { useBugsStore } from '../stores/bugs'
 import { useDiscussionStore } from '../stores/discussion'
 import { useSessionStore } from '../stores/session'
 import { useTasksStore } from '../stores/tasks'
@@ -49,6 +50,7 @@ const tasks = useTasksStore()
 const session = useSessionStore()
 const toast = useToastStore()
 const discussion = useDiscussionStore()
+const bugsStore = useBugsStore()
 
 const { selected } = storeToRefs(tasks)
 const { members, permissions, staff } = storeToRefs(session)
@@ -185,6 +187,8 @@ async function pickBug(bugId: number): Promise<void> {
     // Привязанный баг ушёл из перечня свободных — убираем и у себя,
     // чтобы он не предлагался снова до перезагрузки списка.
     bugOptions.value = bugOptions.value.filter((item) => item.id !== bugId)
+    // То же и на странице багов: там он тоже больше не свободен.
+    bugsStore.forget(bugId)
     toast.show(`${taskCode(updated.id)}: привязан баг #${bugId}`)
   }
 }
@@ -196,8 +200,10 @@ async function dropBug(): Promise<void> {
   const updated = await tasks.detachBug(task.id)
   if (updated) {
     // Освобождённый баг может понадобиться снова — перечень
-    // перечитается при следующем открытии списка.
+    // перечитается при следующем открытии списка. Страница багов
+    // тоже показывает устаревший состав: там он теперь свободен.
     bugOptions.value = []
+    bugsStore.invalidate()
     toast.show(`${taskCode(updated.id)}: баг отвязан`)
   }
 }

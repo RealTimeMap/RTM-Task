@@ -4,6 +4,7 @@ import { storeToRefs } from 'pinia'
 
 import AvatarBadge from './ui/AvatarBadge.vue'
 import MarkdownEditor from './ui/MarkdownEditor.vue'
+import { useBugsStore } from '../stores/bugs'
 import { useSessionStore } from '../stores/session'
 import { useTasksStore } from '../stores/tasks'
 import { useToastStore } from '../stores/toast'
@@ -39,6 +40,7 @@ const emit = defineEmits<{ close: [] }>()
 const tasks = useTasksStore()
 const session = useSessionStore()
 const toast = useToastStore()
+const bugsStore = useBugsStore()
 
 const { members, permissions, staff } = storeToRefs(session)
 
@@ -209,6 +211,11 @@ async function submit(): Promise<void> {
     })
 
     if (created) {
+      // Баг, ушедший в задачу, больше не свободен — на странице багов
+      // его предлагать нельзя.
+      if (typeof created.bugId === 'number') {
+        bugsStore.forget(created.bugId)
+      }
       toast.show(`${taskCode(created.id)} создана`)
       emit('close')
     }

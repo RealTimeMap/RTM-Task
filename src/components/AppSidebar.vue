@@ -29,22 +29,38 @@ interface ViewOption {
   label: string
   scope: ScopeMode
   view: ViewMode
+  /** Пункт ведёт не к задачам — выделяется своим цветом. */
+  accent?: string
 }
 
 const viewOptions: ViewOption[] = [
   { key: 'mine', label: 'Мои задачи', scope: 'mine', view: 'board' },
   { key: 'all', label: 'Все задачи', scope: 'all', view: 'board' },
   { key: 'list', label: 'Список задач', scope: 'all', view: 'list' },
+  // Баги стоят в том же ряду: с точки зрения человека это такой же
+  // раздел, куда он переключается. Область видимости на них не влияет —
+  // перечень свободных багов один на всех, — но поле требуется типом,
+  // и «все» здесь честнее «моих».
+  { key: 'bugs', label: 'Баги', scope: 'all', view: 'bugs', accent: 'var(--danger)' },
+  // Идеи — тоже не задачи, но и не баги: копилка замыслов, из которых
+  // задачи однажды вырастут.
+  { key: 'ideas', label: 'Идеи', scope: 'all', view: 'ideas', accent: 'var(--warning)' },
 ]
 
 const activeView = computed(() => {
+  if (view.value === 'bugs') return 'bugs'
+  if (view.value === 'ideas') return 'ideas'
   if (view.value === 'list') return 'list'
   return scope.value === 'mine' ? 'mine' : 'all'
 })
 
 async function pickView(option: ViewOption): Promise<void> {
   tasks.view = option.view
-  await tasks.setScope(option.scope)
+  // Страница багов не читает задачи: перезагружать их список при
+  // переходе на неё значило бы ждать запрос ради того, что не видно.
+  if (option.view !== 'bugs' && option.view !== 'ideas') {
+    await tasks.setScope(option.scope)
+  }
   // На телефоне меню перекрывает контент — после выбора его надо убрать.
   emit('close')
 }
@@ -116,7 +132,10 @@ const roleLabel = computed(() => (staff.value ? ROLE_LABELS[staff.value.role] : 
             :aria-current="activeView === option.key ? 'page' : undefined"
             @click="pickView(option)"
           >
-            <span class="nav-item__dot" />
+            <span
+              class="nav-item__dot"
+              :style="option.accent && activeView === option.key ? { background: option.accent } : undefined"
+            />
             <span class="nav-item__label">{{ option.label }}</span>
           </button>
         </div>
