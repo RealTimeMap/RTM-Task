@@ -12,12 +12,16 @@ import TaskBoard from './components/TaskBoard.vue'
 import TaskDialog from './components/TaskDialog.vue'
 import TaskList from './components/TaskList.vue'
 import ToastBar from './components/ui/ToastBar.vue'
+import { useBugsStore } from './stores/bugs'
 import { useDiscussionStore } from './stores/discussion'
+import { useIdeasStore } from './stores/ideas'
 import { useSessionStore } from './stores/session'
 import { useTasksStore } from './stores/tasks'
 
 const session = useSessionStore()
 const tasks = useTasksStore()
+const bugs = useBugsStore()
+const ideas = useIdeasStore()
 const discussion = useDiscussionStore()
 
 const { isAuthenticated, failure } = storeToRefs(session)
@@ -29,10 +33,21 @@ const booting = ref(true)
 /** Поднимает realtime и список задач для вошедшего сотрудника. */
 async function startWorkspace(staffId: number): Promise<void> {
   tasks.connect(staffId)
-  // Подписка на обсуждение вешается на тот же сокет — после connect,
-  // иначе подписываться было бы не на что.
+  // Подписки вешаются на тот же сокет — после connect, иначе
+  // подписываться было бы не на что.
   discussion.subscribe()
+  ideas.subscribe()
+  bugs.subscribe()
   await tasks.load()
+
+  // Баги и идеи раньше читались только при заходе в свой раздел, но
+  // бейджи в меню показывают их состав с первого экрана — а пустой
+  // бейдж до первого захода означал бы «ничего нет» там, где есть.
+  // Не ждём: задачи уже на экране, и меню дорисует счётчики само.
+  // Отказ тут не разбираем — сбой feedback-service не должен мешать
+  // доске, а на своей странице он показывается как положено.
+  void bugs.ensureLoaded()
+  void ideas.ensureLoaded()
 }
 
 onMounted(async () => {
@@ -51,6 +66,7 @@ watch(
   async (staffId, previous) => {
     if (previous !== null) {
       discussion.close()
+      bugs.unsubscribe()
       tasks.disconnect()
     }
     if (staffId !== null) {
@@ -60,6 +76,9 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  // Часы обновления багов переживают сокет: их нужно снять отдельно,
+  // иначе они продолжат тикать по закрытому соединению.
+  bugs.unsubscribe()
   tasks.disconnect()
 })
 

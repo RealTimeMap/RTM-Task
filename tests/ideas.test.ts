@@ -89,10 +89,15 @@ globalThis.fetch = (async (input: string, init?: RequestInit) => {
     return json(commentsAnswer)
   }
 
-  // Отметка выполнения.
+  // Отметка выполнения. Идентификатор берём из адреса, а не ставим
+  // единицу: порядок в списке проверяется по нему, и подменённая сеть,
+  // отвечающая всегда про одну идею, скрыла бы перестановку.
   if (/\/ideas\/\d+\/done/.test(url)) {
     const done = (body as { done: boolean }).done
-    return json(idea({ id: 1, done, doneById: done ? 7 : null }))
+    const id = Number(url.match(/\/ideas\/(\d+)\/done/)?.[1] ?? 1)
+    return json(
+      idea({ id, done, doneById: done ? 7 : null, createdAt: createdAtById[id] }),
+    )
   }
 
   // Правка идеи.
@@ -116,6 +121,17 @@ globalThis.fetch = (async (input: string, init?: RequestInit) => {
 
   throw new Error(`Неожиданный запрос: ${method} ${url}`)
 }) as typeof fetch
+
+/**
+ * Даты заведения по идентификатору — чтобы ответ подменённой сети на
+ * отметку совпадал с тем, что лежит в списке: иначе идея «переезжала»
+ * бы из-за смены даты, а не из-за отметки.
+ */
+const createdAtById: Record<number, string> = {
+  1: '2026-09-14T12:40:18Z',
+  2: '2026-09-14T13:01:20Z',
+  3: '2026-09-14T13:01:48Z',
+}
 
 function fresh() {
   setActivePinia(createPinia())
@@ -260,6 +276,37 @@ check('перечень не помечен прочитанным', broken.load
 
 broken.clearError()
 check('ошибка сбрасывается', broken.error, null)
+
+// --- Порядок при смене отметки ---------------------------------------------
+//
+// Сервер держит невыполненные сверху (done ASC, created_at DESC, id DESC).
+// Отметка «сделано» меняет место идеи, и обновление на месте оставило бы
+// закрытую идею среди открытых — список разошёлся бы и с сервером, и с
+// фильтром «Не сделано».
+
+const ordered = fresh()
+ideasAnswer = {
+  items: [
+    idea({ id: 3, done: false, createdAt: createdAtById[3] }),
+    idea({ id: 2, done: false, createdAt: createdAtById[2] }),
+    idea({ id: 1, done: false, createdAt: createdAtById[1] }),
+  ],
+  total: 3,
+  limit: 200,
+  offset: 0,
+}
+await ordered.load()
+check('исходный порядок', ordered.items.map((i) => i.id).join(','), '3,2,1')
+
+// Закрываем верхнюю — она должна уйти под все незакрытые.
+await ordered.setDone(3, true)
+check('закрытая идея ушла вниз', ordered.items.map((i) => i.id).join(','), '2,1,3')
+check('фильтр «не сделано» её не показывает', ordered.openCount, 2)
+
+// И вернуться наверх, когда её открыли снова.
+await ordered.setDone(3, false)
+check('открытая идея вернулась наверх', ordered.items.map((i) => i.id).join(','), '3,2,1')
+check('счётчик открытых восстановился', ordered.openCount, 3)
 
 if (failed > 0) {
   console.error(`\n${failed} проверок не пройдено`)

@@ -155,16 +155,32 @@ async function saveEdit(): Promise<void> {
   }
 }
 
+/**
+ * Идея, отметку которой сейчас переключают.
+ *
+ * Нужна, чтобы второй щелчок не ушёл следом за первым: состояние в
+ * сторе меняется только с ответом сервера, и до него оба вызова
+ * прочитали бы одно и то же `done` — отправили бы одно и то же
+ * значение дважды, и отметка осталась бы там же, где была, вопреки
+ * двум нажатиям.
+ */
+const togglingId = ref<number | null>(null)
+
 /** Отмечает идею сделанной или возвращает в работу. */
 async function toggleDone(idea: Idea, event?: Event): Promise<void> {
   // Щелчок по отметке не должен заодно открывать карточку: это два
   // разных намерения, и попасть в галочку мимо карточки невозможно.
   event?.stopPropagation()
-  if (!canWrite.value) return
+  if (!canWrite.value || togglingId.value !== null) return
 
-  const updated = await ideas.toggleDone(idea.id)
-  if (updated) {
-    toast.show(updated.done ? 'Идея отмечена сделанной' : 'Идея снова в работе')
+  togglingId.value = idea.id
+  try {
+    const updated = await ideas.toggleDone(idea.id)
+    if (updated) {
+      toast.show(updated.done ? 'Идея отмечена сделанной' : 'Идея снова в работе')
+    }
+  } finally {
+    togglingId.value = null
   }
 }
 
@@ -302,7 +318,7 @@ function stamp(iso: string): string {
             <button
               class="tk-tap check"
               :class="{ 'check--done': idea.done }"
-              :disabled="!canWrite"
+              :disabled="!canWrite || togglingId !== null"
               :aria-pressed="idea.done"
               :title="idea.done ? 'Вернуть в работу' : 'Отметить сделанной'"
               @click="toggleDone(idea, $event)"
@@ -410,6 +426,7 @@ function stamp(iso: string): string {
                 v-if="canWrite"
                 class="tk-tap tk-plain detail__done"
                 :class="{ 'detail__done--undo': selected.done }"
+                :disabled="togglingId !== null"
                 @click="toggleDone(selected)"
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3">
@@ -681,11 +698,20 @@ function stamp(iso: string): string {
   text-decoration-color: var(--ink-30);
 }
 
+/*
+  Отметка равняется по середине первой строки заголовка, а не по верху
+  карточки: карточка тянется описанием и датой, и прижатая к её краю
+  галочка вставала бы выше текста тем заметнее, чем длиннее идея.
+  Сдвиг считается от строки (13px × 1.35) и высоты самой отметки,
+  поэтому держится и на крупной мобильной цели, где раньше
+  фиксированный 1px не спасал.
+*/
 .check {
-  width: 22px;
-  height: 22px;
+  --check-size: 22px;
+  width: var(--check-size);
+  height: var(--check-size);
   flex: none;
-  margin-top: 1px;
+  margin-top: calc((13px * 1.35 - var(--check-size)) / 2);
   display: grid;
   place-items: center;
   border: 1.5px solid var(--line-hover);
@@ -700,12 +726,17 @@ function stamp(iso: string): string {
   height: 13px;
 }
 
+/* Фон задаём и при наведении: общий .tk-tap:hover красит его серым, и
+   с одним только border-color отметка теряла бы свой цвет под курсором
+   — у псевдокласса специфичность выше, чем у голого класса. */
 .check:hover:not(:disabled) {
   border-color: var(--success);
+  background: transparent;
   color: var(--ink-30);
 }
 
-.check--done {
+.check--done,
+.check--done:hover:not(:disabled) {
   border-color: var(--success);
   background: var(--success-bg);
   color: var(--success-ink);
@@ -928,6 +959,11 @@ function stamp(iso: string): string {
   height: 15px;
 }
 
+.detail__done:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
 .detail__done--undo {
   background: var(--fill-hover);
   color: var(--ink-70);
@@ -1112,8 +1148,7 @@ function stamp(iso: string): string {
   }
 
   .check {
-    width: 26px;
-    height: 26px;
+    --check-size: 26px;
   }
 
   .detail__done,
@@ -1135,8 +1170,7 @@ function stamp(iso: string): string {
   }
 
   .check {
-    width: 26px;
-    height: 26px;
+    --check-size: 26px;
   }
 }
 </style>

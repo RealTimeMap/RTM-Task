@@ -3,6 +3,8 @@ import { computed } from 'vue'
 import { storeToRefs } from 'pinia'
 
 import AvatarBadge from './ui/AvatarBadge.vue'
+import { useBugsStore } from '../stores/bugs'
+import { useIdeasStore } from '../stores/ideas'
 import { useSessionStore } from '../stores/session'
 import { useTasksStore, type ScopeMode, type ViewMode } from '../stores/tasks'
 import {
@@ -21,8 +23,13 @@ const emit = defineEmits<{ create: []; close: [] }>()
 
 const session = useSessionStore()
 const tasks = useTasksStore()
+const bugs = useBugsStore()
+const ideas = useIdeasStore()
 const { staff, permissions } = storeToRefs(session)
-const { scope, view, typeFilter, typeCounts, projectFilter } = storeToRefs(tasks)
+const { scope, view, typeFilter, typeCounts, projectFilter, activeMineCount } =
+  storeToRefs(tasks)
+const { total: bugsTotal } = storeToRefs(bugs)
+const { openCount: openIdeas } = storeToRefs(ideas)
 
 interface ViewOption {
   key: string
@@ -31,21 +38,46 @@ interface ViewOption {
   view: ViewMode
   /** Пункт ведёт не к задачам — выделяется своим цветом. */
   accent?: string
+  /**
+   * Сколько записей ждут внимания в этом разделе. `undefined` — раздел
+   * ничего не накапливает (вроде «Все задачи»), и бейджа у него нет.
+   */
+  count?: number
 }
 
-const viewOptions: ViewOption[] = [
-  { key: 'mine', label: 'Мои задачи', scope: 'mine', view: 'board' },
+const viewOptions = computed<ViewOption[]>(() => [
+  {
+    key: 'mine',
+    label: 'Мои задачи',
+    scope: 'mine',
+    view: 'board',
+    count: activeMineCount.value,
+  },
   { key: 'all', label: 'Все задачи', scope: 'all', view: 'board' },
   { key: 'list', label: 'Список задач', scope: 'all', view: 'list' },
   // Баги стоят в том же ряду: с точки зрения человека это такой же
   // раздел, куда он переключается. Область видимости на них не влияет —
   // перечень свободных багов один на всех, — но поле требуется типом,
   // и «все» здесь честнее «моих».
-  { key: 'bugs', label: 'Баги', scope: 'all', view: 'bugs', accent: 'var(--danger)' },
+  {
+    key: 'bugs',
+    label: 'Баги',
+    scope: 'all',
+    view: 'bugs',
+    accent: 'var(--danger)',
+    count: bugsTotal.value,
+  },
   // Идеи — тоже не задачи, но и не баги: копилка замыслов, из которых
   // задачи однажды вырастут.
-  { key: 'ideas', label: 'Идеи', scope: 'all', view: 'ideas', accent: 'var(--warning)' },
-]
+  {
+    key: 'ideas',
+    label: 'Идеи',
+    scope: 'all',
+    view: 'ideas',
+    accent: 'var(--warning)',
+    count: openIdeas.value,
+  },
+])
 
 const activeView = computed(() => {
   if (view.value === 'bugs') return 'bugs'
@@ -137,6 +169,17 @@ const roleLabel = computed(() => (staff.value ? ROLE_LABELS[staff.value.role] : 
               :style="option.accent && activeView === option.key ? { background: option.accent } : undefined"
             />
             <span class="nav-item__label">{{ option.label }}</span>
+            <!-- Бейдж показывается только там, где что-то накопилось:
+                 нулевой счётчик — это «пусто», и мигать ему не о чем. -->
+            <span
+              v-if="option.count"
+              class="nav-item__badge"
+              :style="option.accent ? { '--badge-tone': option.accent } : undefined"
+              :title="`${option.label}: ${option.count}`"
+            >
+              <span class="nav-item__badge-pulse" aria-hidden="true" />
+              <span class="nav-item__badge-value">{{ option.count > 99 ? '99+' : option.count }}</span>
+            </span>
           </button>
         </div>
       </nav>
@@ -427,6 +470,82 @@ const roleLabel = computed(() => (staff.value ? ROLE_LABELS[staff.value.role] : 
   font-size: 13.5px;
   font-weight: 600;
   white-space: nowrap;
+}
+
+/*
+  Бейдж активных записей раздела.
+
+  Тон задаётся разделом: баги красные, идеи жёлтые, задачи — акцентные.
+  --badge-tone подставляется из данных пункта, значение по умолчанию
+  держится здесь, чтобы пункт без своего цвета не остался без тона.
+*/
+.nav-item__badge {
+  --badge-tone: var(--accent);
+  position: relative;
+  flex: none;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10.5px;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--badge-tone);
+  background: color-mix(in srgb, var(--badge-tone) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--badge-tone) 34%, transparent);
+}
+
+/*
+  Пульс — отдельный слой под цифрой: анимировать сам бейдж значило бы
+  растягивать вместе с ним число, а оно должно оставаться читаемым.
+  Кольцо расходится и гаснет — взгляд цепляется за движение, но оно не
+  мельтешит рядом с текстом.
+*/
+.nav-item__badge-pulse {
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  border: 1px solid var(--badge-tone);
+  opacity: 0;
+  animation: tkBadgePulse 2.4s cubic-bezier(0.22, 0.9, 0.24, 1) infinite;
+}
+
+.nav-item__badge-value {
+  position: relative;
+}
+
+@keyframes tkBadgePulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  70% {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+}
+
+/* Активный раздел уже выделен заливкой — бейджу хватает своего тона,
+   а вот пульс рядом с выбранным пунктом только шумит: человек уже
+   здесь, звать его больше некуда. */
+.nav-item--active .nav-item__badge-pulse {
+  animation: none;
+}
+
+/* Движение ради привлечения внимания — первое, от чего отказываются
+   при выключенной анимации. Бейдж остаётся, пульс уходит. */
+@media (prefers-reduced-motion: reduce) {
+  .nav-item__badge-pulse {
+    animation: none;
+  }
 }
 
 .type-item__dot {

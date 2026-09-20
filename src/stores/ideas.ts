@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 
 import { ideaCommentsApi, ideasApi } from '../api/ideas'
 import { errorMessage } from '../api/client'
+import { IdeaEvents, getSocket } from '../api/socket'
 import type {
   CreateIdeaPayload,
   Idea,
@@ -20,6 +21,24 @@ import type {
 
 /** Что показывать в списке. */
 export type IdeaScope = 'all' | 'open' | 'done'
+
+/**
+ * Сравнение идей в том же порядке, что задаёт сервер:
+ * невыполненные сверху, внутри — свежие первыми.
+ *
+ * Повторяет `done ASC, created_at DESC, id DESC` из репозитория.
+ * Второй и третий ключи нужны не меньше первого: без даты идеи с
+ * одинаковой отметкой встали бы как придётся, а без id — зависели бы
+ * от устойчивости сортировки.
+ */
+function compareIdeas(a: Idea, b: Idea): number {
+  if (a.done !== b.done) return a.done ? 1 : -1
+
+  const diff = (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0)
+  if (diff !== 0) return diff
+
+  return b.id - a.id
+}
 
 export const useIdeasStore = defineStore('ideas', () => {
   const items = ref<Idea[]>([])
@@ -71,19 +90,38 @@ export const useIdeasStore = defineStore('ideas', () => {
     })
   })
 
-  /** Кладёт идею в список или обновляет существующую. */
+  /**
+   * Кладёт идею в список или обновляет существующую.
+   *
+   * Отметка «сделано» меняет место идеи: сервер держит невыполненные
+   * сверху. Обновление на месте оставляло бы закрытую идею среди
+   * открытых до следующей загрузки — и список противоречил бы и
+   * серверу, и фильтру «Не сделано».
+   */
   function upsert(idea: Idea): void {
     const index = items.value.findIndex((item) => item.id === idea.id)
     if (index === -1) {
-      // Новая идея встаёт наверх: список открывают, чтобы увидеть
-      // свежее, а серверный порядок — невыполненные сверху по убыванию
-      // даты — ставит её туда же.
-      items.value = [idea, ...items.value]
+      items.value = insertSorted(items.value, idea)
       total.value += 1
       return
     }
 
+    // Пересортировка всего списка дешевле поиска нового индекса
+    // вручную: копилка невелика и уже упорядочена.
+    // Пересортировка всего списка дешевле поиска нового индекса
+    // вручную: копилка невелика и уже упорядочена.
+    const moved = items.value[index].done !== idea.done
     items.value[index] = idea
+    if (moved) {
+      items.value = [...items.value].sort(compareIdeas)
+    }
+  }
+
+  /** Вставляет идею на её место в уже упорядоченном списке. */
+  function insertSorted(list: Idea[], idea: Idea): Idea[] {
+    const at = list.findIndex((item) => compareIdeas(idea, item) < 0)
+    if (at === -1) return [...list, idea]
+    return [...list.slice(0, at), idea, ...list.slice(at)]
   }
 
   function remove(id: number): void {
@@ -126,6 +164,74 @@ export const useIdeasStore = defineStore('ideas', () => {
   async function ensureLoaded(): Promise<void> {
     if (loaded.value || loading.value) return
     await load()
+  }
+
+  /**
+   * Подписывается на изменения идей по сокету.
+   *
+   * Копилку правят из нескольких окон сразу, а её состав виден бейджем
+   * в меню с любого экрана: без подписки число держалось бы неверным
+   * до следующего захода в раздел.
+   *
+   * Вешается на тот же сокет, что и задачи, — после connect, иначе
+   * подписываться было бы не на что. Комната общая: идею никому не
+   * назначают, и делить поток по получателям незачем.
+   */
+  function subscribe(): void {
+    const socket = getSocket()
+    if (!socket) return
+
+    // Обе правки приносят идею целиком — upsert разберётся, новая она
+    // или уже известная.
+    for (const event of [IdeaEvents.Created, IdeaEvents.Updated]) {
+      socket.on(event, (idea: Idea) => upsert(idea))
+    }
+
+    socket.on(IdeaEvents.Deleted, (idea: Idea) => remove(idea.id))
+
+    // Реплики меняют счётчик на карточке, а открытое обсуждение —
+    // ещё и свой список. Сервер шлёт саму реплику, но пересчитывать
+    // по ней нечего: число реплик приходит только со списком, поэтому
+    // счётчик правим на месте.
+    socket.on(IdeaEvents.CommentAdded, (comment: IdeaComment) => {
+      applyCommentDelta(comment.ideaId, 1)
+      if (selectedId.value !== comment.ideaId) return
+      if (comments.value.some((item) => item.id === comment.id)) return
+      comments.value = [...comments.value, comment]
+    })
+
+    socket.on(IdeaEvents.CommentUpdated, (comment: IdeaComment) => {
+      if (selectedId.value !== comment.ideaId) return
+      const index = comments.value.findIndex((item) => item.id === comment.id)
+      if (index !== -1) {
+        comments.value[index] = comment
+      }
+    })
+
+    socket.on(IdeaEvents.CommentDeleted, (comment: IdeaComment) => {
+      applyCommentDelta(comment.ideaId, -1)
+      if (selectedId.value !== comment.ideaId) return
+      comments.value = comments.value.filter((item) => item.id !== comment.id)
+    })
+  }
+
+  /**
+   * Сдвигает счётчик реплик идеи.
+   *
+   * Событие приносит одну реплику, а не новое число: пересчитать его
+   * можно только по открытому обсуждению, которого у закрытой карточки
+   * нет. Поэтому счётчик двигаем на единицу — и не ниже нуля, чтобы
+   * задвоившееся событие не увело его в минус.
+   */
+  function applyCommentDelta(ideaId: number, delta: number): void {
+    const index = items.value.findIndex((item) => item.id === ideaId)
+    if (index === -1) return
+
+    const current = items.value[index]
+    items.value[index] = {
+      ...current,
+      commentCount: Math.max(0, current.commentCount + delta),
+    }
   }
 
   /**
@@ -285,6 +391,7 @@ export const useIdeasStore = defineStore('ideas', () => {
     commentsError,
     load,
     ensureLoaded,
+    subscribe,
     create,
     update,
     setDone,

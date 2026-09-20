@@ -35,6 +35,33 @@ export const TaskEvents = {
 
 export type TaskEventName = (typeof TaskEvents)[keyof typeof TaskEvents]
 
+/**
+ * События копилки идей. Идут по тому же сокету и в ту же комнату, что
+ * и задачи: подписка у них общая, а раздельные namespace потребовали
+ * бы второго соединения ради того же потока.
+ */
+export const IdeaEvents = {
+  Created: 'ideaCreated',
+  Updated: 'ideaUpdated',
+  Deleted: 'ideaDeleted',
+
+  CommentAdded: 'ideaCommentAdded',
+  CommentUpdated: 'ideaCommentUpdated',
+  CommentDeleted: 'ideaCommentDeleted',
+} as const
+
+export type IdeaEventName = (typeof IdeaEvents)[keyof typeof IdeaEvents]
+
+/**
+ * Перечень свободных багов стал другим: баг взяли в работу или
+ * вернули в разбор.
+ *
+ * Событие приходит пустым — это приглашение перечитать перечень, а не
+ * сам баг: каталог живёт в feedback-service, и его состав знает
+ * только он.
+ */
+export const BugsChangedEvent = 'bugsChanged'
+
 /** Ответ сервера на запрос клиента. */
 type Ack<T> =
   | ({ success: true } & T)

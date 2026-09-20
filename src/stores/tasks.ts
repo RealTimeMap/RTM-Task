@@ -183,8 +183,14 @@ export const useTasksStore = defineStore('tasks', () => {
   /** Задача, которую сейчас перетаскивают по доске. */
   const draggingId = ref<number | null>(null)
 
-  /** Идентификатор сотрудника, от чьего имени работает стор. */
-  let viewerId: number | null = null
+  /**
+   * Идентификатор сотрудника, от чьего имени работает стор.
+   *
+   * Ref, а не обычная переменная: от него зависит счётчик моих задач в
+   * меню, и с простым `let` тот закэшировался бы с пустым значением —
+   * стор создаётся до входа, а вход присваивание не отследил бы.
+   */
+  const viewerId = ref<number | null>(null)
 
   const selected = computed(
     () => items.value.find((task) => task.id === selectedId.value) ?? null,
@@ -233,6 +239,26 @@ export const useTasksStore = defineStore('tasks', () => {
   const completedCount = computed(
     () => items.value.filter((task) => task.status === 'complete').length,
   )
+
+  /**
+   * Сколько незавершённых задач числится за сотрудником — для бейджа
+   * «Моих задач» в меню.
+   *
+   * Считается по исполнителю, а не по текущей области видимости: в
+   * режиме «Все задачи» в списке лежат и чужие, и без этой проверки
+   * бейдж «моих» показывал бы чужую работу. Завершённые не в счёт —
+   * бейдж говорит «здесь ждут тебя», а сделанное уже не ждёт.
+   *
+   * В режиме «Мои» список ограничен сервером — значит, число полное; в
+   * режиме «Все» оно верно для загруженной страницы, и это честнее
+   * отдельного запроса ради одной цифры.
+   */
+  const activeMineCount = computed(() => {
+    if (viewerId.value === null) return 0
+    return items.value.filter(
+      (task) => task.assigneeId === viewerId.value && task.status !== 'complete',
+    ).length
+  })
 
   /**
    * Кладёт задачу в список или обновляет существующую.
@@ -327,7 +353,7 @@ export const useTasksStore = defineStore('tasks', () => {
     // иначе realtime приносил бы то, что не вернула бы загрузка.
     if (projectFilter.value !== 'all' && task.project !== projectFilter.value) return false
     if (scope.value === 'all') return true
-    return task.assigneeId === viewerId || task.creatorId === viewerId
+    return task.assigneeId === viewerId.value || task.creatorId === viewerId.value
   }
 
   function baseFilters(): TaskFilters {
@@ -336,8 +362,8 @@ export const useTasksStore = defineStore('tasks', () => {
       sort: sort.value.field,
       order: sort.value.order,
     }
-    if (scope.value === 'mine' && viewerId !== null) {
-      filters.assigneeId = viewerId
+    if (scope.value === 'mine' && viewerId.value !== null) {
+      filters.assigneeId = viewerId.value
     }
     if (projectFilter.value !== 'all') {
       filters.project = projectFilter.value
@@ -408,7 +434,7 @@ export const useTasksStore = defineStore('tasks', () => {
    * определяется заголовками шлюза, а не этим значением.
    */
   function connect(staffId: number): void {
-    viewerId = staffId
+    viewerId.value = staffId
     connection.value = 'connecting'
 
     const socket = connectSocket()
@@ -469,7 +495,7 @@ export const useTasksStore = defineStore('tasks', () => {
   function disconnect(): void {
     disconnectSocket()
     connection.value = 'idle'
-    viewerId = null
+    viewerId.value = null
   }
 
   /**
@@ -479,9 +505,9 @@ export const useTasksStore = defineStore('tasks', () => {
    * и так знает о ней — сигнал был бы эхом собственного клика.
    */
   function announceTask(task: Task): void {
-    if (task.creatorId === viewerId) return
+    if (task.creatorId === viewerId.value) return
 
-    const assigned = task.assigneeId === viewerId
+    const assigned = task.assigneeId === viewerId.value
     notify(
       'task',
       assigned ? 'Новая задача на вас' : 'Новая задача',
@@ -498,11 +524,11 @@ export const useTasksStore = defineStore('tasks', () => {
    * выключили совсем. Уведомляем только там, где мы участники.
    */
   function announceComment(comment: Comment): void {
-    if (comment.authorId === viewerId) return
+    if (comment.authorId === viewerId.value) return
 
     const task = items.value.find((item) => item.id === comment.taskId)
     if (!task) return
-    if (task.assigneeId !== viewerId && task.creatorId !== viewerId) return
+    if (task.assigneeId !== viewerId.value && task.creatorId !== viewerId.value) return
 
     notify(
       'comment',
@@ -664,6 +690,7 @@ export const useTasksStore = defineStore('tasks', () => {
     columns,
     typeCounts,
     completedCount,
+    activeMineCount,
     load,
     setScope,
     setProject,
