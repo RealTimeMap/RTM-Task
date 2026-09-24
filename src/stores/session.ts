@@ -5,7 +5,7 @@ import { staffApi } from '../api/staff'
 import { ApiError, errorMessage } from '../api/client'
 import { AuthError, login as authLogin, logout as authLogout, restoreToken } from '../api/auth'
 import type { Staff } from '../types/staff'
-import { canAssignAnyone, canCreateTask, canDeleteTask } from '../types/staff'
+import { canAssignAnyone, canCreateTask, canDeleteTask, canReviewBug } from '../types/staff'
 
 /** Почему интерфейс недоступен — определяет, что показать вместо него. */
 export type SessionFailure = 'unauthorized' | 'forbidden' | 'unavailable'
@@ -31,12 +31,13 @@ export const useSessionStore = defineStore('session', () => {
   const permissions = computed(() => {
     const role = staff.value?.role
     if (!role) {
-      return { canCreate: false, canAssignAnyone: false, canDelete: false }
+      return { canCreate: false, canAssignAnyone: false, canDelete: false, canReviewBugs: false }
     }
     return {
       canCreate: canCreateTask(role),
       canAssignAnyone: canAssignAnyone(role),
       canDelete: canDeleteTask(role),
+      canReviewBugs: canReviewBug(role),
     }
   })
 

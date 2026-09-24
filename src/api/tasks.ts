@@ -3,6 +3,8 @@ import type {
   Bug,
   BugDetail,
   BugListResponse,
+  BugQueue,
+  BugRejectReason,
   BugTag,
   ChecklistItem,
   ChecklistResponse,
@@ -85,8 +87,29 @@ export const tasksApi = {
  * в форме, где выбирают, над каким багом заводить работу.
  */
 export const bugsApi = {
-  list(filters: { tag?: BugTag; limit?: number } = {}): Promise<BugListResponse> {
+  /**
+   * Перечень свободных багов. Без status сервер отдаёт подтверждённые —
+   * те, что можно взять в задачу.
+   */
+  list(
+    filters: { tag?: BugTag; status?: BugQueue; limit?: number } = {},
+  ): Promise<BugListResponse> {
     return request<BugListResponse>('/bugs', { query: { ...filters } })
+  },
+
+  /** Разработчик воспроизвёл баг: теперь его можно брать в задачу. */
+  confirm(id: number, comment?: string): Promise<Bug> {
+    return request<Bug>(`/bugs/${id}/confirm`, { method: 'POST', body: { comment } })
+  },
+
+  /** Проверка баг не подтвердила. Причина обязательна. */
+  reject(id: number, reason: BugRejectReason, comment?: string): Promise<Bug> {
+    return request<Bug>(`/bugs/${id}/reject`, { method: 'POST', body: { reason, comment } })
+  },
+
+  /** Возвращает баг на повторную проверку и стирает прежнее решение. */
+  reopen(id: number): Promise<Bug> {
+    return request<Bug>(`/bugs/${id}/reopen`, { method: 'POST' })
   },
 }
 

@@ -15,6 +15,7 @@ import {
   STATUS_TITLES,
   STATUS_TONES,
   pluralBugs,
+  BUG_QUEUE_TITLES,
   pluralIdeas,
   pluralTasks,
 } from '../lib/presentation'
@@ -66,7 +67,7 @@ const bugs = useBugsStore()
 const ideas = useIdeasStore()
 const { scope, view, query, statusFilter, visible, total, completedCount, connection } =
   storeToRefs(tasks)
-const { visible: visibleBugs, total: totalBugs } = storeToRefs(bugs)
+const { visible: visibleBugs, total: totalBugs, queue: bugQueue } = storeToRefs(bugs)
 const { visible: visibleIdeas, openCount: openIdeas } = storeToRefs(ideas)
 
 /**
@@ -96,7 +97,7 @@ const subtitle = computed(() => {
   if (onBugs.value) {
     const count = visibleBugs.value.length
     return count === totalBugs.value
-      ? `${count} ${pluralBugs(count)} в разборе`
+      ? `${count} ${pluralBugs(count)} · ${BUG_QUEUE_TITLES[bugQueue.value].toLowerCase()}`
       : `${count} из ${totalBugs.value}`
   }
 

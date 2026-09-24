@@ -5,6 +5,8 @@
 
 import {
   Priority,
+  type BugQueue,
+  type BugRejectReason,
   type BugTag,
   type TaskPriority,
   type TaskProject,
@@ -115,17 +117,39 @@ export const BUG_TAG_TITLES: Record<BugTag, string> = {
 }
 
 /**
- * Подписи состояний бага. Значения задаёт feedback-service и переводит
- * домен (internal/domain/task/bug.go — BugSync).
+ * Подписи состояний бага. Значения задаёт feedback-service.
  *
  * Незнакомое значение показывается как есть: выдумывать за чужой сервис
- * нельзя, а скрывать состояние — тем более. Перечень свободных багов
- * почти всегда состоит из new, но состояние в нём приходит всегда.
+ * нельзя, а скрывать состояние — тем более.
  */
 export const BUG_STATUS_TITLES: Record<string, string> = {
-  new: 'Новый',
+  new: 'Ждёт проверки',
+  confirmed: 'Подтверждён',
+  rejected: 'Отклонён',
   'in work': 'В работе',
   closed: 'Закрыт',
+  canceled: 'Отменён',
+}
+
+/** Подписи перечней на странице багов. */
+export const BUG_QUEUE_TITLES: Record<BugQueue, string> = {
+  new: 'На проверке',
+  confirmed: 'Готовы к работе',
+  rejected: 'Отклонённые',
+}
+
+/** Подписи причин отклонения. Коды принадлежат feedback-service. */
+export const BUG_REJECT_REASON_TITLES: Record<BugRejectReason, string> = {
+  not_reproducible: 'Не воспроизводится',
+  not_a_bug: 'Не баг',
+  duplicate: 'Дубликат',
+  insufficient_info: 'Мало сведений',
+  spam: 'Спам',
+}
+
+/** Подпись причины отклонения, с запасом на незнакомый код. */
+export function bugRejectReasonTitle(reason: string): string {
+  return BUG_REJECT_REASON_TITLES[reason as BugRejectReason] ?? reason
 }
 
 /** Подпись состояния бага, с запасом на незнакомое значение. */

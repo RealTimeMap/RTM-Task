@@ -4,11 +4,17 @@ import { defineStore } from 'pinia'
 import { bugsApi } from '../api/tasks'
 import { ApiError, errorMessage } from '../api/client'
 import { BugsChangedEvent, getSocket } from '../api/socket'
-import type { Bug, BugTag } from '../types/task'
+import type { Bug, BugQueue, BugRejectReason, BugTag } from '../types/task'
+import { useToastStore } from './toast'
 
 /**
  * Перечень багов feedback-service — то, из чего рождаются задачи типа
  * «баг».
+ *
+ * Перечней три, по состояниям проверки: отчёты, ждущие проверки,
+ * подтверждённые баги, которые можно брать в работу, и отклонённые.
+ * Большая часть отчётов не подтверждается, поэтому между «пришёл отчёт»
+ * и «взяли в задачу» стоит проверка разработчиком.
  *
  * Отдельный стор, а не часть tasks: баг живёт в чужом сервисе, не
  * приходит по сокету и не участвует ни в доске, ни в фильтрах задач.
@@ -40,9 +46,53 @@ const PAGE_LIMIT = 200
 
 export type BugSortField = 'createdAt' | 'tag'
 
+/**
+ * Перечни, которые перечитываются всегда.
+ *
+ * Очередь проверки и готовые к работе — то, что требует внимания: их
+ * счётчики стоят на вкладках и в бейдже меню, поэтому держать их
+ * свежими нужно, даже когда смотрят на другую вкладку. Отклонённые
+ * нужны редко — они грузятся, только когда их открыли.
+ */
+const ALWAYS_LOADED: BugQueue[] = ['new', 'confirmed']
+
+function emptyLists(): Record<BugQueue, Bug[]> {
+  return { new: [], confirmed: [], rejected: [] }
+}
+
 export const useBugsStore = defineStore('bugs', () => {
-  const items = ref<Bug[]>([])
-  const total = ref(0)
+  const lists = ref<Record<BugQueue, Bug[]>>(emptyLists())
+
+  /**
+   * Открытый перечень. По умолчанию — очередь проверки: с неё разбор и
+   * начинается, а готовые к работе без неё не пополнятся.
+   */
+  const queue = ref<BugQueue>('new')
+
+  /** Отклонённые уже грузили — значит, их нужно держать свежими. */
+  const rejectedLoaded = ref(false)
+
+  /** Баги открытого перечня. */
+  const items = computed(() => lists.value[queue.value])
+  const total = computed(() => items.value.length)
+
+  /** Сколько багов в каждом перечне — для вкладок. */
+  const queueCounts = computed<Record<BugQueue, number>>(() => ({
+    new: lists.value.new.length,
+    confirmed: lists.value.confirmed.length,
+    rejected: lists.value.rejected.length,
+  }))
+
+  /**
+   * Сколько багов ждут внимания — для бейджа в меню: непроверенные
+   * отчёты и подтверждённые, которые ещё никто не взял. Отклонённые
+   * внимания не ждут.
+   */
+  const attentionCount = computed(() => lists.value.new.length + lists.value.confirmed.length)
+
+  /** Решение по багу, которое прямо сейчас уходит на сервер. */
+  const reviewing = ref<number | null>(null)
+
   const loading = ref(false)
   const error = ref<string | null>(null)
 
@@ -129,11 +179,24 @@ export const useBugsStore = defineStore('bugs', () => {
       unavailable.value = false
     }
 
+    const queues: BugQueue[] =
+      queue.value === 'rejected' || rejectedLoaded.value
+        ? [...ALWAYS_LOADED, 'rejected']
+        : ALWAYS_LOADED
+
     try {
-      const response = await bugsApi.list({ limit: PAGE_LIMIT })
-      items.value = response.items
-      total.value = response.total
+      const responses = await Promise.all(
+        queues.map((status) => bugsApi.list({ status, limit: PAGE_LIMIT })),
+      )
+      const next = { ...lists.value }
+      queues.forEach((status, index) => {
+        next[status] = responses[index].items
+      })
+      lists.value = next
+      if (queues.includes('rejected')) rejectedLoaded.value = true
       loaded.value = true
+
+      const current = next[queue.value]
 
       // Открытый баг мог уйти из перечня — например, его успел взять
       // кто-то другой. Тогда карточка закрывается: показывать отчёт,
@@ -146,7 +209,7 @@ export const useBugsStore = defineStore('bugs', () => {
       if (
         !silent &&
         selectedId.value !== null &&
-        !response.items.some((bug) => bug.id === selectedId.value)
+        !current.some((bug) => bug.id === selectedId.value)
       ) {
         selectedId.value = null
       }
@@ -190,13 +253,93 @@ export const useBugsStore = defineStore('bugs', () => {
    * взять его второй раз.
    */
   function forget(bugId: number): void {
-    const index = items.value.findIndex((bug) => bug.id === bugId)
-    if (index === -1) return
-
-    items.value.splice(index, 1)
-    total.value = Math.max(0, total.value - 1)
-    if (selectedId.value === bugId) {
+    let found = false
+    for (const status of Object.keys(lists.value) as BugQueue[]) {
+      const list = lists.value[status]
+      const index = list.findIndex((bug) => bug.id === bugId)
+      if (index !== -1) {
+        list.splice(index, 1)
+        found = true
+      }
+    }
+    if (found && selectedId.value === bugId) {
       selectedId.value = null
+    }
+  }
+
+  /**
+   * Кладёт баг в перечень, соответствующий его новому состоянию.
+   *
+   * Сервер вернул баг после решения — ждать перечитывания, оставляя
+   * подтверждённый отчёт в очереди проверки, значило бы предлагать
+   * проверить его второй раз.
+   */
+  function place(bug: Bug): void {
+    for (const status of Object.keys(lists.value) as BugQueue[]) {
+      lists.value[status] = lists.value[status].filter((item) => item.id !== bug.id)
+    }
+
+    const target = bug.status as BugQueue
+    if (target in lists.value) {
+      lists.value[target] = [bug, ...lists.value[target]]
+    }
+
+    // Карточка закрывается: баг ушёл из открытого перечня, и следующий
+    // отчёт в очереди важнее того, по которому решение уже принято.
+    if (selectedId.value === bug.id && target !== queue.value) {
+      selectedId.value = null
+    }
+  }
+
+  /**
+   * Выполняет решение по багу.
+   *
+   * Отказ сервера показывается уведомлением, а не баннером: перечень
+   * при этом не сломан, не удалось одно действие. Чаще всего это
+   * значит, что баг успел поменяться — например, его уже взяли в
+   * задачу, — поэтому перечень перечитывается.
+   */
+  async function review(bugId: number, action: () => Promise<Bug>): Promise<Bug | null> {
+    if (reviewing.value !== null) return null
+
+    reviewing.value = bugId
+    try {
+      const updated = await action()
+      place(updated)
+      return updated
+    } catch (err) {
+      useToastStore().show(errorMessage(err))
+      if (err instanceof ApiError && (err.status === 409 || err.isNotFound)) {
+        void refresh()
+      }
+      return null
+    } finally {
+      reviewing.value = null
+    }
+  }
+
+  function confirm(bugId: number, comment?: string): Promise<Bug | null> {
+    return review(bugId, () => bugsApi.confirm(bugId, comment?.trim() || undefined))
+  }
+
+  function reject(bugId: number, reason: BugRejectReason, comment?: string): Promise<Bug | null> {
+    return review(bugId, () => bugsApi.reject(bugId, reason, comment?.trim() || undefined))
+  }
+
+  function reopen(bugId: number): Promise<Bug | null> {
+    return review(bugId, () => bugsApi.reopen(bugId))
+  }
+
+  /**
+   * Открывает перечень. Отклонённые при первом открытии догружаются:
+   * держать их в памяти заранее незачем — к ним возвращаются редко.
+   */
+  function setQueue(next: BugQueue): void {
+    if (queue.value === next) return
+    queue.value = next
+    selectedId.value = null
+    if (next === 'rejected' && !rejectedLoaded.value) {
+      void load()
     }
   }
 
@@ -272,8 +415,13 @@ export const useBugsStore = defineStore('bugs', () => {
   }
 
   return {
+    lists,
     items,
     total,
+    queue,
+    queueCounts,
+    attentionCount,
+    reviewing,
     loading,
     error,
     unavailable,
@@ -291,6 +439,11 @@ export const useBugsStore = defineStore('bugs', () => {
     subscribe,
     unsubscribe,
     forget,
+    place,
+    confirm,
+    reject,
+    reopen,
+    setQueue,
     select,
     clearError,
   }

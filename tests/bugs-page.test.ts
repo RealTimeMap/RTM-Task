@@ -40,8 +40,15 @@ let answer: { items: Bug[]; total: number } = { items: [], total: 0 }
 let failure: { status: number; code: string; field?: string } | null = null
 let requests = 0
 
-globalThis.fetch = (async (input: string) => {
+/** Адреса запросов — чтобы проверить, какие перечни стор запросил. */
+let urls: string[] = []
+
+/** Ответ на решение по багу: сервер возвращает баг в новом состоянии. */
+let reviewed: Bug | null = null
+
+globalThis.fetch = (async (input: string, init?: RequestInit) => {
   requests += 1
+  urls.push(String(input))
 
   if (failure) {
     return new Response(
@@ -54,6 +61,13 @@ globalThis.fetch = (async (input: string) => {
   // что стор ходит не туда.
   if (!String(input).includes('/bugs')) {
     throw new Error(`Неожиданный запрос: ${input}`)
+  }
+
+  if (init?.method === 'POST') {
+    return new Response(JSON.stringify(reviewed), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
   }
 
   return new Response(JSON.stringify(answer), {
@@ -79,7 +93,15 @@ answer = {
 }
 
 const store = fresh()
+urls = []
 await store.load()
+
+// Очередь проверки и готовые к работе грузятся всегда — их счётчики
+// стоят на вкладках и в бейдже. Отклонённые — только по требованию.
+check('запрошена очередь проверки', urls.some((url) => url.includes('status=new')), true)
+check('запрошены готовые', urls.some((url) => url.includes('status=confirmed')), true)
+check('отклонённые не запрошены', urls.some((url) => url.includes('status=rejected')), false)
+check('по умолчанию открыта очередь проверки', store.queue, 'new')
 
 check('перечень загружен', store.items.length, 3)
 check('всего багов', store.total, 3)
@@ -155,6 +177,52 @@ store.select(1)
 answer = { items: [bug({ id: 3, tag: 'feature' })], total: 1 }
 await store.load()
 check('исчезнувший баг перестал быть выбранным', store.selectedId, null)
+
+// --- Очереди и решения по багу ------------------------------------------
+
+const review = fresh()
+answer = {
+  items: [bug({ id: 1, status: 'new' }), bug({ id: 2, status: 'new' })],
+  total: 2,
+}
+await review.load()
+check('в очереди два отчёта', review.queueCounts.new, 2)
+// Мок отвечает одним перечнем на все запросы — и готовых тоже два.
+check('бейдж считает очередь и готовые', review.attentionCount, 4)
+
+// Подтверждённый баг уходит из очереди в готовые — сразу, не дожидаясь
+// перечитывания: иначе его предложили бы проверить второй раз.
+review.lists.confirmed = []
+review.select(1)
+reviewed = bug({ id: 1, status: 'confirmed', reviewComment: 'воспроизвёлся' })
+const confirmedBug = await review.confirm(1, '  воспроизвёлся  ')
+check('подтверждение вернуло баг', confirmedBug?.status, 'confirmed')
+check('баг ушёл из очереди', review.lists.new.some((item) => item.id === 1), false)
+check('баг появился в готовых', review.lists.confirmed[0]?.id, 1)
+check('карточка ушедшего бага закрыта', review.selectedId, null)
+check('решение не висит', review.reviewing, null)
+
+// Отклонённые догружаются при первом открытии вкладки.
+urls = []
+answer = { items: [bug({ id: 5, status: 'rejected', rejectReason: 'spam' })], total: 1 }
+review.setQueue('rejected')
+await new Promise((resolve) => setTimeout(resolve, 0))
+check('отклонённые запрошены при открытии', urls.some((url) => url.includes('status=rejected')), true)
+check('открыт перечень отклонённых', review.items[0]?.id, 5)
+
+// Возврат на проверку переносит баг обратно в очередь.
+reviewed = bug({ id: 5, status: 'new' })
+await review.reopen(5)
+check('отклонённый вернулся в очередь', review.lists.new.some((item) => item.id === 5), true)
+check('и ушёл из отклонённых', review.lists.rejected.length, 0)
+
+// Отказ сервера по состоянию бага не ломает перечень.
+failure = { status: 409, code: 'conflict' }
+const refused = await review.reject(5, 'duplicate')
+check('отказ вернул null', refused, null)
+check('баг остался на месте', review.lists.new.some((item) => item.id === 5), true)
+failure = null
+reviewed = null
 
 // --- Недоступность сервиса ---------------------------------------------
 

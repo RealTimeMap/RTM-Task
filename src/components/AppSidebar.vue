@@ -28,7 +28,9 @@ const ideas = useIdeasStore()
 const { staff, permissions } = storeToRefs(session)
 const { scope, view, typeFilter, typeCounts, projectFilter, activeMineCount } =
   storeToRefs(tasks)
-const { total: bugsTotal } = storeToRefs(bugs)
+// Бейдж считает то, что ждёт внимания: непроверенные отчёты и
+// подтверждённые баги, которые ещё никто не взял.
+const { attentionCount: bugsTotal } = storeToRefs(bugs)
 const { openCount: openIdeas } = storeToRefs(ideas)
 
 interface ViewOption {

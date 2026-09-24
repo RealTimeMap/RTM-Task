@@ -31,6 +31,15 @@ export function canCreateTask(role: StaffRole): boolean {
   return role === 'admin' || role === 'manager' || role === 'developer'
 }
 
+/**
+ * Кто вправе подтверждать и отклонять отчёты о багах. Совпадает с
+ * сервером (CanReviewBug в internal/domain/role/model.go): круг тот же,
+ * что у заведения задач.
+ */
+export function canReviewBug(role: StaffRole): boolean {
+  return canCreateTask(role)
+}
+
 export function canAssignAnyone(role: StaffRole): boolean {
   return role === 'admin' || role === 'manager'
 }

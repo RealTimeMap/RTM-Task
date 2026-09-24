@@ -8,13 +8,25 @@
  */
 
 import {
+  BUG_QUEUE_ORDER,
+  BUG_REJECT_REASONS,
   DEFAULT_PROJECT,
   PROJECT_ORDER,
+  bugReviewActions,
   canAttachBug,
+  canTakeBug,
   hasBug,
 } from '../src/types/task'
-import type { Task, TaskProject } from '../src/types/task'
-import { PROJECT_SHORT, PROJECT_TITLES, PROJECT_TONES } from '../src/lib/presentation'
+import type { Bug, Task, TaskProject } from '../src/types/task'
+import {
+  BUG_QUEUE_TITLES,
+  BUG_REJECT_REASON_TITLES,
+  PROJECT_SHORT,
+  PROJECT_TITLES,
+  PROJECT_TONES,
+  bugRejectReasonTitle,
+  bugStatusTitle,
+} from '../src/lib/presentation'
 
 let failed = 0
 
@@ -63,6 +75,48 @@ check(
   false,
 )
 check('в задаче на проверке привязка доступна', canAttachBug(task({ status: 'review' })), true)
+
+// --- Проверка отчёта --------------------------------------------------
+// Правила повторяют feedback-service (domain/bug/service.go): клиент
+// прячет кнопки, которые сервер всё равно отклонит.
+
+const fresh = bugReviewActions('new')
+check('непроверенный можно подтвердить', fresh.confirm, true)
+check('непроверенный можно отклонить', fresh.reject, true)
+check('непроверенный возвращать на проверку некуда', fresh.reopen, false)
+
+const confirmed = bugReviewActions('confirmed')
+check('подтверждённый повторно не подтверждают', confirmed.confirm, false)
+check('подтверждённый можно отклонить', confirmed.reject, true)
+check('подтверждённый можно вернуть на проверку', confirmed.reopen, true)
+
+// Смена решения должна быть явной: отклонённый сначала возвращают на
+// проверку, а уже потом подтверждают.
+const rejected = bugReviewActions('rejected')
+check('отклонённый сразу не подтвердить', rejected.confirm, false)
+check('отклонённый повторно не отклоняют', rejected.reject, false)
+check('отклонённый можно вернуть на проверку', rejected.reopen, true)
+
+// Баг в работе управляется задачей — решений по нему здесь нет.
+const inWork = bugReviewActions('in work')
+check('баг в работе не проверяют', inWork.confirm || inWork.reject || inWork.reopen, false)
+
+function bug(status: string): Bug {
+  return { id: 1, title: 'Баг', tag: 'ui', status, hasLogs: false, createdAt: '' }
+}
+
+check('в задачу берут подтверждённый', canTakeBug(bug('confirmed')), true)
+check('непроверенный в задачу не берут', canTakeBug(bug('new')), false)
+check('отклонённый в задачу не берут', canTakeBug(bug('rejected')), false)
+
+for (const queue of BUG_QUEUE_ORDER) {
+  check(`у перечня ${queue} есть подпись`, typeof BUG_QUEUE_TITLES[queue], 'string')
+  check(`у состояния ${queue} есть подпись`, bugStatusTitle(queue) !== queue, true)
+}
+for (const reason of BUG_REJECT_REASONS) {
+  check(`у причины ${reason} есть подпись`, typeof BUG_REJECT_REASON_TITLES[reason], 'string')
+}
+check('незнакомая причина показывается как есть', bugRejectReasonTitle('other'), 'other')
 
 // --- Проекты ---------------------------------------------------------
 

@@ -10,7 +10,12 @@
 
 import { computed, ref } from 'vue'
 
-import { BUG_TAG_TITLES, isNarrowScreen, shortDate } from '../lib/presentation'
+import {
+  BUG_TAG_TITLES,
+  bugRejectReasonTitle,
+  isNarrowScreen,
+  shortDate,
+} from '../lib/presentation'
 import type { BugDetail } from '../types/task'
 
 const props = defineProps<{
@@ -70,6 +75,21 @@ const facts = computed(() => {
   // Пустые строки не показываем: «ОС: —» ничего не сообщает, а место
   // занимает.
   return rows.filter((row) => row.value !== '')
+})
+
+/**
+ * Пояснение разработчика, проверявшего отчёт: чаще всего — как баг
+ * удалось воспроизвести. Тому, кто взял задачу, это экономит первый
+ * час работы.
+ */
+const review = computed(() => {
+  const bug = props.bug
+  if (!bug?.reviewComment && !bug?.rejectReason) return null
+  return {
+    reason: bug.rejectReason ? bugRejectReasonTitle(bug.rejectReason) : '',
+    comment: bug.reviewComment ?? '',
+    at: bug.reviewedAt ? shortDate(bug.reviewedAt) : '',
+  }
 })
 
 const logs = computed(() => props.bug?.logs ?? [])
@@ -143,6 +163,15 @@ const logsText = computed(() => logs.value.join('\n'))
             <dd>{{ row.value }}</dd>
           </div>
         </dl>
+
+        <section v-if="review" class="review">
+          <h3 class="report__label">
+            ПРОВЕРКА
+            <span v-if="review.at" class="review__at">{{ review.at }}</span>
+          </h3>
+          <p v-if="review.reason" class="review__reason">{{ review.reason }}</p>
+          <p v-if="review.comment" class="review__comment">{{ review.comment }}</p>
+        </section>
 
         <section class="logs">
           <h3 class="report__label">
@@ -312,6 +341,43 @@ const logsText = computed(() => logs.value.join('\n'))
   font-weight: 700;
   letter-spacing: 0.07em;
   color: var(--ink-40);
+}
+
+.review {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 11px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(61, 220, 151, 0.25);
+  background: var(--success-bg);
+}
+
+.review .report__label {
+  margin: 0;
+}
+
+.review__at {
+  margin-left: 6px;
+  font-weight: 600;
+  color: var(--ink-40);
+  letter-spacing: 0;
+}
+
+.review__reason {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--danger-ink);
+}
+
+.review__comment {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-70);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .facts {

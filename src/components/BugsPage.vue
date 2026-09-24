@@ -3,6 +3,12 @@
  * Страница багов — перечень отчётов из feedback-service, из которых
  * заводят работу.
  *
+ * Отчёт проходит проверку, прежде чем по нему заводят задачу: большая
+ * часть присланного не воспроизводится, и задачи по таким отчётам были
+ * бы пустой работой. Поэтому перечней три — «На проверке», «Готовы к
+ * работе» и «Отклонённые», — и взять в работу можно только
+ * подтверждённый баг.
+ *
  * Отдельный экран, а не список внутри формы создания: багов приходит
  * больше, чем задач, и прежде чем взять один в работу, их разбирают —
  * читают, сравнивают, отсеивают. В выпадающем перечне на пол-экрана
@@ -14,7 +20,7 @@
  * того как баг взяли.
  */
 
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 
 import { BUG_TAG_ORDER, useBugsStore } from '../stores/bugs'
@@ -22,9 +28,12 @@ import { useSessionStore } from '../stores/session'
 import { useTasksStore } from '../stores/tasks'
 import { useToastStore } from '../stores/toast'
 import {
+  BUG_QUEUE_TITLES,
+  BUG_REJECT_REASON_TITLES,
   BUG_TAG_TITLES,
   PRIORITY_ORDER,
   PROJECT_TITLES,
+  bugRejectReasonTitle,
   bugStatusTitle,
   isNarrowScreen,
   priorityTone,
@@ -33,10 +42,17 @@ import {
   taskCode,
 } from '../lib/presentation'
 import {
+  BUG_QUEUE_ORDER,
+  BUG_REJECT_REASONS,
   DEFAULT_PROJECT,
+  MAX_BUG_REVIEW_COMMENT,
   PROJECT_ORDER,
   Priority,
+  bugReviewActions,
+  canTakeBug,
   type Bug,
+  type BugQueue,
+  type BugRejectReason,
   type BugTag,
   type TaskPriority,
   type TaskProject,
@@ -47,13 +63,40 @@ const tasks = useTasksStore()
 const session = useSessionStore()
 const toast = useToastStore()
 
-const { visible, selected, loading, error, unavailable, query, tagFilter, sortField, tagCounts } =
-  storeToRefs(bugs)
+const {
+  visible,
+  selected,
+  loading,
+  error,
+  unavailable,
+  query,
+  tagFilter,
+  sortField,
+  tagCounts,
+  queue,
+  queueCounts,
+  reviewing,
+} = storeToRefs(bugs)
 const { permissions, staff } = storeToRefs(session)
 
 onMounted(() => {
   void bugs.ensureLoaded()
 })
+
+const queueOptions = computed(() =>
+  BUG_QUEUE_ORDER.map((key: BugQueue) => ({
+    key,
+    label: BUG_QUEUE_TITLES[key],
+    count: queueCounts.value[key],
+  })),
+)
+
+/** Что сказать, когда в перечне пусто. У каждого перечня своё «пусто». */
+const EMPTY_NOTES: Record<BugQueue, string> = {
+  new: 'Непроверенных отчётов нет — очередь разобрана.',
+  confirmed: 'Подтверждённых багов нет. Новые появятся здесь после проверки.',
+  rejected: 'Отклонённых отчётов нет.',
+}
 
 const tagOptions = computed(() => {
   const keys: (BugTag | 'all')[] = ['all', ...BUG_TAG_ORDER]
@@ -103,12 +146,68 @@ const facts = computed(() => {
     { label: 'Состояние', value: bug.status ? bugStatusTitle(bug.status) : '' },
     { label: 'Отправлен', value: `${shortDate(bug.createdAt)}, ${shortTime(bug.createdAt)}` },
     { label: 'Журнал', value: bug.hasLogs ? 'Приложен' : 'Не приложен' },
+    { label: 'Проверен', value: bug.reviewedAt ? shortDate(bug.reviewedAt) : '' },
+    { label: 'Причина', value: bug.rejectReason ? bugRejectReasonTitle(bug.rejectReason) : '' },
   ]
 
   // Пустые строки не показываем: «Сборка: —» ничего не сообщает,
   // а место занимает.
   return rows.filter((row) => row.value !== '')
 })
+
+/** Какие решения доступны открытому багу. */
+const actions = computed(() =>
+  selected.value ? bugReviewActions(selected.value.status) : null,
+)
+
+/**
+ * Черновик решения: пояснение и причина отклонения.
+ *
+ * Одно поле пояснения на оба решения: подтверждая, пишут, как баг
+ * воспроизвёлся, отклоняя — почему не вышло. Две формы с одним и тем
+ * же полем только путали бы.
+ */
+const reviewComment = ref('')
+const rejectReason = ref<BugRejectReason>('not_reproducible')
+
+/**
+ * Открыта ли форма отклонения.
+ *
+ * Отклонение — не соседняя кнопка, а отдельный шаг: ему нужна причина,
+ * и промахнуться мимо «Подтвердить» по отчёту, над которым только что
+ * сидели, слишком дорого.
+ */
+const rejecting = ref(false)
+
+const commentTooLong = computed(() => reviewComment.value.length > MAX_BUG_REVIEW_COMMENT)
+
+// Черновик принадлежит конкретному отчёту: пояснение к одному багу,
+// оставшееся в поле при переходе к другому, ушло бы не туда.
+watch(
+  () => selected.value?.id,
+  () => {
+    reviewComment.value = ''
+    rejectReason.value = 'not_reproducible'
+    rejecting.value = false
+  },
+)
+
+async function confirmBug(bug: Bug): Promise<void> {
+  if (commentTooLong.value) return
+  const updated = await bugs.confirm(bug.id, reviewComment.value)
+  if (updated) toast.show(`Баг #${bug.id} подтверждён — он в «Готовы к работе»`)
+}
+
+async function rejectBug(bug: Bug): Promise<void> {
+  if (commentTooLong.value) return
+  const updated = await bugs.reject(bug.id, rejectReason.value, reviewComment.value)
+  if (updated) toast.show(`Баг #${bug.id} отклонён: ${BUG_REJECT_REASON_TITLES[rejectReason.value]}`)
+}
+
+async function reopenBug(bug: Bug): Promise<void> {
+  const updated = await bugs.reopen(bug.id)
+  if (updated) toast.show(`Баг #${bug.id} возвращён на проверку`)
+}
 
 /**
  * Заводит задачу по багу и открывает её.
@@ -120,13 +219,15 @@ const facts = computed(() => {
  * значит взять его на себя.
  */
 async function take(bug: Bug): Promise<void> {
-  if (taking.value !== null) return
+  // Сервер отклонит неподтверждённый баг — не отправляем заведомо
+  // неудачный запрос.
+  if (taking.value !== null || !canTakeBug(bug)) return
 
   taking.value = bug.id
   try {
     const created = await tasks.create({
       title: bug.title,
-      description: bug.description || undefined,
+      description: taskDescription(bug),
       type: 'bug',
       priority: priority.value,
       project: project.value,
@@ -151,10 +252,45 @@ async function take(bug: Bug): Promise<void> {
     taking.value = null
   }
 }
+
+/**
+ * Описание задачи: текст отчёта и пояснение проверявшего.
+ *
+ * Пояснение — чаще всего шаги, которыми баг воспроизвёлся, — и есть то,
+ * с чего начнёт исполнитель. Держать его только в отчёте значило бы
+ * прятать самое полезное за лишним щелчком.
+ */
+function taskDescription(bug: Bug): string | undefined {
+  const report = bug.description?.trim() ?? ''
+  const review = bug.reviewComment?.trim() ?? ''
+  if (!review) return report || undefined
+
+  const note = `**Проверка:** ${review}`
+  return report ? `${report}\n\n${note}` : note
+}
 </script>
 
 <template>
   <div class="tk-fade bugs">
+    <!-- Перечни по состоянию проверки. Счётчики видны на всех вкладках
+         сразу: очередь проверки растёт, пока смотрят на готовые. -->
+    <div class="tk-scroll queues" role="tablist" aria-label="Перечень багов">
+      <button
+        v-for="option in queueOptions"
+        :key="option.key"
+        role="tab"
+        class="tk-tap tk-plain queue"
+        :class="[`queue--${option.key}`, { 'queue--active': queue === option.key }]"
+        :aria-selected="queue === option.key"
+        @click="bugs.setQueue(option.key)"
+      >
+        {{ option.label }}
+        <span v-if="option.key !== 'rejected' || option.count" class="queue__count">
+          {{ option.count }}
+        </span>
+      </button>
+    </div>
+
     <!-- Панель разбора: поиск, категории и порядок. Живёт здесь, а не
          в шапке: шапка обслуживает задачи, и её поиск ищет по ним. -->
     <div class="bugs__bar">
@@ -224,7 +360,7 @@ async function take(bug: Bug): Promise<void> {
       По запросу «{{ query.trim() }}» ничего не нашлось.
     </p>
 
-    <p v-else-if="!visible.length" class="note">Свободных багов нет — всё разобрано.</p>
+    <p v-else-if="!visible.length" class="note">{{ EMPTY_NOTES[queue] }}</p>
 
     <div v-else class="bugs__body">
       <ul class="tk-scroll list">
@@ -252,6 +388,16 @@ async function take(bug: Bug): Promise<void> {
             <span v-if="bug.platform || bug.build" class="card__meta">
               <span v-if="bug.platform">{{ bug.platform }}</span>
               <span v-if="bug.build">сборка {{ bug.build }}</span>
+            </span>
+
+            <!-- Итог проверки виден прямо в перечне: отклонённые без
+                 причины не разобрать, а пояснение к подтверждённому
+                 помогает выбрать, что брать первым. -->
+            <span v-if="bug.rejectReason" class="card__review card__review--rejected">
+              {{ bugRejectReasonTitle(bug.rejectReason) }}
+            </span>
+            <span v-else-if="bug.reviewComment" class="card__review">
+              {{ bug.reviewComment }}
             </span>
           </button>
         </li>
@@ -286,6 +432,15 @@ async function take(bug: Bug): Promise<void> {
             </div>
           </dl>
 
+          <div
+            v-if="selected.reviewComment"
+            class="verdict"
+            :class="{ 'verdict--rejected': selected.status === 'rejected' }"
+          >
+            <span class="verdict__label">ПОЯСНЕНИЕ ПРОВЕРКИ</span>
+            <p class="verdict__text">{{ selected.reviewComment }}</p>
+          </div>
+
           <!-- Журнал остаётся за привязкой: сервис отдаёт его только по
                багу, который уже ведёт задача. Говорим об этом прямо,
                чтобы значок «ЛОГ» на карточке не выглядел обманом. -->
@@ -294,7 +449,96 @@ async function take(bug: Bug): Promise<void> {
           </p>
         </div>
 
-        <footer v-if="permissions.canCreate" class="detail__foot">
+        <!-- Отклонение — отдельный шаг с причиной. Открывается и из
+             очереди проверки, и из готовых к работе: подтверждение тоже
+             бывает поспешным. -->
+        <footer v-if="permissions.canReviewBugs && rejecting" class="detail__foot">
+          <label class="param">
+            <span class="param__label">ПРИЧИНА ОТКЛОНЕНИЯ</span>
+            <select v-model="rejectReason" class="param__select">
+              <option v-for="reason in BUG_REJECT_REASONS" :key="reason" :value="reason">
+                {{ BUG_REJECT_REASON_TITLES[reason] }}
+              </option>
+            </select>
+          </label>
+
+          <textarea
+            v-model="reviewComment"
+            class="comment"
+            :class="{ 'comment--error': commentTooLong }"
+            rows="2"
+            placeholder="Почему отклонён — необязательно"
+            aria-label="Пояснение к отклонению"
+          />
+
+          <div class="decide">
+            <button
+              class="tk-tap tk-plain ghost"
+              :disabled="reviewing !== null"
+              @click="rejecting = false"
+            >
+              Отмена
+            </button>
+            <button
+              class="tk-tap tk-plain reject"
+              :disabled="reviewing !== null || commentTooLong"
+              @click="rejectBug(selected)"
+            >
+              {{ reviewing === selected.id ? 'Отклоняем…' : 'Отклонить' }}
+            </button>
+          </div>
+        </footer>
+
+        <!-- Очередь проверки: главное действие — подтвердить. -->
+        <footer
+          v-else-if="permissions.canReviewBugs && actions?.confirm"
+          class="detail__foot"
+        >
+          <textarea
+            v-model="reviewComment"
+            class="comment"
+            :class="{ 'comment--error': commentTooLong }"
+            rows="2"
+            placeholder="Как воспроизвёлся — необязательно, попадёт в задачу"
+            aria-label="Пояснение к подтверждению"
+          />
+
+          <button
+            class="tk-tap tk-plain take"
+            :disabled="reviewing !== null || commentTooLong"
+            @click="confirmBug(selected)"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1">
+              <path d="M5 12.6l3.4 3.4L19 5.4" />
+            </svg>
+            {{ reviewing === selected.id ? 'Подтверждаем…' : 'Подтвердить — воспроизводится' }}
+          </button>
+
+          <button
+            class="tk-tap tk-plain ghost ghost--danger"
+            :disabled="reviewing !== null"
+            @click="rejecting = true"
+          >
+            Отклонить…
+          </button>
+        </footer>
+
+        <!-- Отклонённый: решение можно только пересмотреть. -->
+        <footer
+          v-else-if="permissions.canReviewBugs && selected.status === 'rejected'"
+          class="detail__foot"
+        >
+          <button
+            class="tk-tap tk-plain ghost"
+            :disabled="reviewing !== null"
+            @click="reopenBug(selected)"
+          >
+            {{ reviewing === selected.id ? 'Возвращаем…' : 'Вернуть на проверку' }}
+          </button>
+          <p class="take__note">Отчёт снова попадёт в очередь проверки.</p>
+        </footer>
+
+        <footer v-else-if="permissions.canCreate && canTakeBug(selected)" class="detail__foot">
           <div class="params">
             <label class="param">
               <span class="param__label">ПРОЕКТ</span>
@@ -323,12 +567,31 @@ async function take(bug: Bug): Promise<void> {
           </button>
 
           <p class="take__note">Задача заведётся на вас с этим багом.</p>
+
+          <div v-if="permissions.canReviewBugs && actions" class="decide">
+            <button
+              v-if="actions.reopen"
+              class="tk-tap tk-plain ghost"
+              :disabled="reviewing !== null || taking !== null"
+              @click="reopenBug(selected)"
+            >
+              {{ reviewing === selected.id ? 'Возвращаем…' : 'На повторную проверку' }}
+            </button>
+            <button
+              v-if="actions.reject"
+              class="tk-tap tk-plain ghost ghost--danger"
+              :disabled="reviewing !== null || taking !== null"
+              @click="rejecting = true"
+            >
+              Отклонить…
+            </button>
+          </div>
         </footer>
 
         <!-- Наблюдатель читает отчёты, но не заводит работу: разбор и
              заведение — разные действия, и право на них разное. -->
         <footer v-else class="detail__foot">
-          <p class="take__note">Вашей роли недоступно заведение задач.</p>
+          <p class="take__note">Вашей роли недоступны проверка отчётов и заведение задач.</p>
         </footer>
       </aside>
     </div>
@@ -344,6 +607,63 @@ async function take(bug: Bug): Promise<void> {
      прокручиваются каждый у себя, а не тянут за собой весь экран. */
   height: 100%;
   min-height: 0;
+}
+
+.queues {
+  display: flex;
+  gap: 4px;
+  flex: none;
+  padding: 3px;
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line-strong);
+  background: var(--fill-soft);
+}
+
+.queue {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 12px;
+  flex: none;
+  border: 0;
+  border-radius: calc(var(--r-md) - 3px);
+  background: transparent;
+  color: var(--ink-60);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.queue--active {
+  background: var(--bg-panel);
+  color: var(--ink);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+.queue__count {
+  min-width: 18px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-align: center;
+  color: var(--ink-45);
+  background: var(--fill-hover);
+}
+
+/* Очередь проверки — то, что ждёт человека: её счётчик выделен. */
+.queue--new .queue__count {
+  color: var(--warning-ink);
+  background: var(--warning-bg);
+}
+
+.queue--confirmed .queue__count {
+  color: var(--accent-ink);
+  background: var(--accent-bg);
 }
 
 .bugs__bar {
@@ -610,6 +930,122 @@ async function take(bug: Bug): Promise<void> {
   font-size: 10.5px;
   font-weight: 600;
   color: var(--ink-30);
+}
+
+.card__review {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--ink-45);
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: var(--fill-hover);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.card__review--rejected {
+  width: fit-content;
+  font-weight: 650;
+  color: var(--danger-ink);
+  background: var(--danger-bg);
+}
+
+.verdict {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 11px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(61, 220, 151, 0.25);
+  background: var(--success-bg);
+}
+
+.verdict--rejected {
+  border-color: rgba(229, 72, 77, 0.25);
+  background: var(--danger-bg);
+}
+
+.verdict__label {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  color: var(--ink-40);
+}
+
+.verdict__text {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-70);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.comment {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 52px;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line-strong);
+  background: var(--bg-panel);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.comment::placeholder {
+  color: var(--ink-30);
+}
+
+.comment--error {
+  border-color: var(--danger);
+}
+
+.decide {
+  display: flex;
+  gap: 8px;
+}
+
+.decide > * {
+  flex: 1;
+}
+
+.ghost {
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--ink-70);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.ghost--danger {
+  color: var(--danger-ink);
+  border-color: rgba(229, 72, 77, 0.3);
+}
+
+.ghost:disabled,
+.reject:disabled {
+  opacity: 0.55;
+}
+
+.reject {
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 0;
+  background: var(--danger);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 650;
 }
 
 .detail {
@@ -980,8 +1416,26 @@ async function take(bug: Bug): Promise<void> {
   }
 
   .tag,
-  .refresh {
+  .refresh,
+  .queue {
     height: 36px;
+  }
+
+  /* Вкладки перечней растягиваются на ширину экрана: три коротких
+     подписи помещаются, а пустое место справа выглядело бы обрывом. */
+  .queues {
+    width: auto;
+  }
+
+  .queue {
+    flex: 1;
+    justify-content: center;
+    padding: 0 8px;
+  }
+
+  .ghost,
+  .reject {
+    height: 42px;
   }
 
   /*

@@ -326,7 +326,8 @@ async function submit(): Promise<void> {
 
             <p v-else-if="bugsError" class="bugs__note bugs__note--error">{{ bugsError }}</p>
             <p v-else-if="!bugs.length" class="bugs__note">
-              Открытых багов нет — задачу можно завести и без привязки.
+              Подтверждённых багов нет — задачу можно завести и без привязки.
+              Новые отчёты сначала проверяют на странице «Баги».
             </p>
 
             <ul v-else class="bugs">

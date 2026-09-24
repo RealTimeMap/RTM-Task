@@ -178,7 +178,8 @@ export interface CreateTaskPayload {
 }
 
 /**
- * Баг из feedback-service, доступный для привязки.
+ * Свободный баг из feedback-service: ждущий проверки, готовый к работе
+ * или отклонённый.
  *
  * Завершённые и уже занятые другой задачей баги сюда не попадают:
  * их отбирает feedback-service.
@@ -193,6 +194,73 @@ export interface Bug {
   build?: string
   hasLogs: boolean
   createdAt: string
+
+  /** Итог проверки разработчиком. Нет, пока отчёт не проверен. */
+  reviewedAt?: string
+  rejectReason?: BugRejectReason
+  /** Как баг воспроизвёлся или почему отклонён. */
+  reviewComment?: string
+}
+
+/**
+ * Перечень багов, который показывает страница.
+ *
+ * Значения совпадают со статусами feedback-service: `new` — отчёт ждёт
+ * проверки, `confirmed` — баг воспроизвели и его можно брать в задачу,
+ * `rejected` — проверка его не подтвердила.
+ */
+export type BugQueue = 'new' | 'confirmed' | 'rejected'
+
+export const BUG_QUEUE_ORDER: BugQueue[] = ['new', 'confirmed', 'rejected']
+
+/**
+ * Почему проверка не подтвердила баг. Коды фиксированы feedback-service:
+ * по ним там считают, какие отчёты чаще оказываются пустыми.
+ */
+export type BugRejectReason =
+  | 'not_reproducible'
+  | 'not_a_bug'
+  | 'duplicate'
+  | 'insufficient_info'
+  | 'spam'
+
+export const BUG_REJECT_REASONS: BugRejectReason[] = [
+  'not_reproducible',
+  'not_a_bug',
+  'duplicate',
+  'insufficient_info',
+  'spam',
+]
+
+/**
+ * Предел пояснения к решению. Совпадает с сервером
+ * (maxBugReviewCommentLength в internal/domain/task/service_bug_review.go).
+ */
+export const MAX_BUG_REVIEW_COMMENT = 2000
+
+/**
+ * Какие решения доступны багу в этом перечне.
+ *
+ * Повторяет правила feedback-service: подтвердить можно только
+ * непроверенный отчёт, отклонить — непроверенный или подтверждённый,
+ * вернуть на проверку — уже проверенный. Отклонённый сначала
+ * возвращают на проверку: смена решения должна быть явной.
+ */
+export function bugReviewActions(status: string): {
+  confirm: boolean
+  reject: boolean
+  reopen: boolean
+} {
+  return {
+    confirm: status === 'new',
+    reject: status === 'new' || status === 'confirmed',
+    reopen: status === 'confirmed' || status === 'rejected',
+  }
+}
+
+/** В задачу берут только подтверждённые баги. */
+export function canTakeBug(bug: Bug): boolean {
+  return bug.status === 'confirmed'
 }
 
 /**
