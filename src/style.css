@@ -53,6 +53,9 @@
   --cyan: #1cb6c8;
   --cyan-ink: #8ee6f0;
   --cyan-bg: rgba(28, 182, 200, 0.14);
+  --orange: #f08a3e;
+  --orange-ink: #ffc49a;
+  --orange-bg: rgba(240, 138, 62, 0.14);
 
   /* Скругления */
   --r-sm: 7px;

@@ -120,7 +120,7 @@ check('незнакомая причина показывается как ес�
 
 // --- Проекты ---------------------------------------------------------
 
-check('проектов ровно два', PROJECT_ORDER.length, 2)
+check('проектов ровно три', PROJECT_ORDER.length, 3)
 check('проект по умолчанию — rtm-app', DEFAULT_PROJECT, 'rtm-app')
 check('проект по умолчанию входит в перечень', PROJECT_ORDER.includes(DEFAULT_PROJECT), true)
 
@@ -134,7 +134,7 @@ for (const project of PROJECT_ORDER) {
 
 // Значения проектов должны совпадать с доменом: сервер принимает
 // только эти строки, опечатка здесь дала бы 422 на каждое создание.
-const expectedProjects: TaskProject[] = ['rtm-task', 'rtm-app']
+const expectedProjects: TaskProject[] = ['rtm-task', 'rtm-app', 'rtm-admin']
 check('состав проектов совпадает с доменом', PROJECT_ORDER.join(','), expectedProjects.join(','))
 
 if (failed > 0) {

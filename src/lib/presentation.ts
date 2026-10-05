@@ -82,18 +82,20 @@ export const STATUS_TONES: Record<TaskStatus, Tone> = {
 }
 
 /**
- * Подписи проектов. Порядок и состав закрыты доменом: проектов ровно
- * два, и новый добавляется здесь же, где и в types/task.ts.
+ * Подписи проектов. Порядок и состав закрыты доменом: проектов всего
+ * несколько, и новый добавляется здесь же, где и в types/task.ts.
  */
 export const PROJECT_TITLES: Record<TaskProject, string> = {
   'rtm-task': 'RTM-Task',
   'rtm-app': 'RTM-App',
+  'rtm-admin': 'RTM-Admin',
 }
 
 /** Короткие подписи проектов — для значка на карточке. */
 export const PROJECT_SHORT: Record<TaskProject, string> = {
   'rtm-task': 'TASK',
   'rtm-app': 'APP',
+  'rtm-admin': 'ADMIN',
 }
 
 export const PROJECT_TONES: Record<TaskProject, { ink: string; bg: string; dot: string }> = {
@@ -106,6 +108,11 @@ export const PROJECT_TONES: Record<TaskProject, { ink: string; bg: string; dot: 
     ink: 'var(--violet-ink)',
     bg: 'var(--violet-bg)',
     dot: 'var(--violet)',
+  },
+  'rtm-admin': {
+    ink: 'var(--orange-ink)',
+    bg: 'var(--orange-bg)',
+    dot: 'var(--orange)',
   },
 }
 

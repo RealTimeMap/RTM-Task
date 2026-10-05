@@ -23,7 +23,7 @@ import type {
   TaskPriority,
   UpdateTaskPayload,
 } from '../types/task'
-import { DEFAULT_SORT, STATUS_ORDER, defaultSortOrder } from '../types/task'
+import { DEFAULT_SORT, PROJECT_ORDER, STATUS_ORDER, defaultSortOrder } from '../types/task'
 import { notify } from '../lib/notify'
 import { taskCode } from '../lib/presentation'
 // Порядок типов — часть представления: он же задаёт последовательность
@@ -87,7 +87,7 @@ const PROJECT_STORAGE_KEY = 'rtm-task:project'
 function restoreProject(): TaskProject | 'all' {
   try {
     const raw = localStorage.getItem(PROJECT_STORAGE_KEY)
-    if (raw === 'rtm-task' || raw === 'rtm-app' || raw === 'all') return raw
+    if (raw === 'all' || (PROJECT_ORDER as string[]).includes(raw ?? '')) return raw as TaskProject | 'all'
     return 'all'
   } catch {
     return 'all'

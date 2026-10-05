@@ -10,9 +10,9 @@ export type TaskType = 'bug' | 'feature' | 'fix' | 'refactor' | 'update'
  * Проект, в который направлена задача. Значения совпадают с доменом
  * (internal/domain/task/model.go - Project).
  */
-export type TaskProject = 'rtm-task' | 'rtm-app'
+export type TaskProject = 'rtm-task' | 'rtm-app' | 'rtm-admin'
 
-export const PROJECT_ORDER: TaskProject[] = ['rtm-task', 'rtm-app']
+export const PROJECT_ORDER: TaskProject[] = ['rtm-task', 'rtm-app', 'rtm-admin']
 
 /**
  * Проект, выбранный в форме создания заранее.
